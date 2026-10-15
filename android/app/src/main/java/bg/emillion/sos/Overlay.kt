@@ -22,13 +22,13 @@ import kotlin.math.abs
  * Три прозореца над всички приложения:
  *  - плаващ бутон SOS (влачи се; задържане 2 сек = тревога / спиране на тревогата)
  *  - мигаща червена рамка по края на екрана — не приема докосвания, всичко отдолу работи
- *  - малка лента горе: кой е колегата, колко далеч, „Тръгвам" и „✕"
+ *  - малка лента горе: кой е колегата, адрес, разстояние и бутони Карта / Waze / Google Maps / ✕
  */
 class Overlay(
     private val ctx: Context,
     private val onHold: () -> Unit,
-    private val onGo: (String) -> Unit,
-    private val onDismiss: (String) -> Unit,
+    /** action: "map", "waze", "gmaps", "dismiss" */
+    private val onAction: (String, String) -> Unit,
 ) {
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val d = ctx.resources.displayMetrics.density
@@ -148,20 +148,28 @@ class Overlay(
         bannerId = id
         if (banner == null) {
             val t = TextView(ctx).apply { setTextColor(Color.WHITE); textSize = 16f; typeface = Typeface.DEFAULT_BOLD }
-            val i = TextView(ctx).apply { setTextColor(0xFFFFCDD2.toInt()); textSize = 13f }
-            val texts = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(t); addView(i)
-            }
-            val go = pill("ТРЪГВАМ", 0xFF2E7D32.toInt()) { bannerId?.let(onGo) }
-            val x = pill("✕", 0x55FFFFFF) { bannerId?.let(onDismiss) }
-            val row = LinearLayout(ctx).apply {
+            val x = pill("✕", 0x55FFFFFF) { act("dismiss") }
+            val head = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                addView(t, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(x)
+            }
+            val i = TextView(ctx).apply {
+                setTextColor(0xFFFFE0E0.toInt()); textSize = 13f
+                setPadding(0, px(4), 0, px(8))
+            }
+            val buttons = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(pill("📍 Карта", 0x55FFFFFF, weight = true) { act("map") })
+                addView(pill("Waze", 0xFF33CCFF.toInt(), weight = true) { act("waze") })
+                addView(pill("Google Maps", 0xFF2E7D32.toInt(), weight = true) { act("gmaps") })
+            }
+            val box = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
                 setPadding(px(14), px(10), px(10), px(10))
                 background = GradientDrawable().apply { setColor(0xF0B71C1C.toInt()); cornerRadius = px(14).toFloat() }
-                addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(go); addView(x)
+                addView(head); addView(i); addView(buttons)
             }
             val lp = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
@@ -172,11 +180,13 @@ class Overlay(
                 y = px(36)
                 horizontalMargin = 0.03f
             }
-            try { wm.addView(row, lp); banner = row; bannerTitle = t; bannerInfo = i } catch (_: Exception) { return }
+            try { wm.addView(box, lp); banner = box; bannerTitle = t; bannerInfo = i } catch (_: Exception) { return }
         }
         bannerTitle?.text = title
         bannerInfo?.text = info
     }
+
+    private fun act(what: String) { bannerId?.let { onAction(it, what) } }
 
     fun hideBanner() {
         banner?.let { try { wm.removeView(it) } catch (_: Exception) {} }
@@ -189,17 +199,19 @@ class Overlay(
         button = null
     }
 
-    private fun pill(label: String, color: Int, click: () -> Unit) = TextView(ctx).apply {
+    private fun pill(label: String, color: Int, weight: Boolean = false, click: () -> Unit) = TextView(ctx).apply {
         text = label
         setTextColor(Color.WHITE)
         textSize = 14f
         typeface = Typeface.DEFAULT_BOLD
-        setPadding(px(14), px(10), px(14), px(10))
+        gravity = Gravity.CENTER
+        setPadding(px(10), px(10), px(10), px(10))
         background = GradientDrawable().apply { setColor(color); cornerRadius = px(20).toFloat() }
         setOnClickListener { click() }
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { leftMargin = px(6) }
+        layoutParams = if (weight)
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = px(3); rightMargin = px(3) }
+        else
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = px(6) }
     }
 }
 
