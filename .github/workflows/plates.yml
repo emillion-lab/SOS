@@ -1,0 +1,24 @@
+name: Plates from registry
+on:
+  schedule:
+    - cron: '0 5 1,15 * *'   # 2 часа след registry-pull в TAXI
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  plates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build plates.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/build_plates.py
+      - name: Commit if changed
+        run: |
+          git config user.name sos-bot
+          git config user.email sos-bot@users.noreply.github.com
+          git add plates.json
+          git diff --cached --quiet && { echo "без промяна"; exit 0; }
+          git commit -m "plates: $(python3 -c "import json;d=json.load(open('plates.json'));print(d['source'],d['count'])")"
+          git push
