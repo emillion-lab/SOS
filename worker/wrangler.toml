@@ -1,0 +1,16 @@
+name = "sos"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
+account_id = "74820d71c551391ce31d309c2fcb091c"
+workers_dev = true
+
+# Един Durable Object държи всички WebSocket връзки (хибернация — плаща се само при съобщение).
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+
+# ADMIN_TOKEN е Worker secret — слага се от deploy workflow-а от GitHub secret SOS_ADMIN_TOKEN.
