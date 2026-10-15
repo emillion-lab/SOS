@@ -7,6 +7,8 @@ permissions:
   contents: write
 jobs:
   plates:
+    # Копието в bgtaxi получава plates.json чрез sync — тук не се пише, иначе историите се разминават.
+    if: github.repository_owner == 'emillion-lab'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
