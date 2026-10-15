@@ -1,0 +1,21 @@
+name: Sync to bgtaxi
+# Кодът се поддържа тук; bgtaxi/SOS е публичното копие за шофьорите.
+# Иска secret BGTAXI_TOKEN (fine-grained токен на bgtaxi, само за bgtaxi/SOS:
+# Contents + Workflows = Read and write). Само ръчно, докато мине зелено.
+on:
+  workflow_dispatch:
+jobs:
+  sync:
+    if: github.repository_owner == 'emillion-lab'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to bgtaxi/SOS
+        env:
+          T: ${{ secrets.BGTAXI_TOKEN }}
+        run: |
+          [ -n "$T" ] || { echo "Липсва secret BGTAXI_TOKEN"; exit 1; }
+          git push --force "https://x-access-token:${T}@github.com/bgtaxi/SOS.git" HEAD:main
+          echo "Копирано: $(git rev-parse --short HEAD) → bgtaxi/SOS"
