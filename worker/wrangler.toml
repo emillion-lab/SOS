@@ -13,4 +13,9 @@ class_name = "Hub"
 tag = "v1"
 new_sqlite_classes = ["Hub"]
 
-# ADMIN_TOKEN е Worker secret — слага се от deploy workflow-а от GitHub secret SOS_ADMIN_TOKEN.
+# Само за четене на admin:token — същият админ токен като на fish.taxi (ротира се от /admin/rotate-token на mvr-proxy).
+[[kv_namespaces]]
+binding = "GPS_STORE"
+id = "2900a1d9de0f49deac2359e558ba5783"
+
+# Качва се от mvr-worker/.github/workflows/deploy-sos.yml — там е CLOUDFLARE_API_TOKEN.
