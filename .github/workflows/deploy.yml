@@ -1,0 +1,20 @@
+name: Deploy Worker
+# Само ръчно, докато репото няма CLOUDFLARE_API_TOKEN и SOS_ADMIN_TOKEN (виж README).
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 74820d71c551391ce31d309c2fcb091c
+          workingDirectory: worker
+          secrets: |
+            ADMIN_TOKEN
+        env:
+          ADMIN_TOKEN: ${{ secrets.SOS_ADMIN_TOKEN }}
+      - name: Health
+        run: curl -fsS https://sos.mihov-emil.workers.dev/health
