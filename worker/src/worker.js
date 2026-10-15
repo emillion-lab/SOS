@@ -7,12 +7,15 @@ const STALE_MS = 10 * 60 * 1000;        // позиция по-стара от �
 const ALARM_TTL_MS = 30 * 60 * 1000;    // тревога изтича сама след 30 мин
 const SOS_COOLDOWN_MS = 10 * 60 * 1000; // 1 тревога на 10 мин от номер
 const PLATES_URL = 'https://raw.githubusercontent.com/emillion-lab/SOS/main/plates.json';
+const APK_URL = 'https://github.com/emillion-lab/SOS/releases/download/apk-latest/SOS.apk';
 const ITER = 100000;                    // таванът на PBKDF2 в Workers
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === '/health') return json({ ok: true, v: 1 });
+    if (url.pathname === '/health') return json({ ok: true, v: 2 });
+    if (url.pathname === '/' && req.method === 'GET')
+      return new Response(HOME_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     if (url.pathname === '/admin' && req.method === 'GET')
       return new Response(ADMIN_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     return env.HUB.get(env.HUB.idFromName('sofia')).fetch(req);
@@ -28,6 +31,13 @@ export class Hub {
     this.platesAt = 0;
   }
 
+  // Същият админ токен като на fish.taxi: secret ADMIN_TOKEN, иначе KV admin:token в GPS_STORE
+  async adminToken() {
+    if (this.env.ADMIN_TOKEN) return this.env.ADMIN_TOKEN;
+    if (this.env.GPS_STORE) return (await this.env.GPS_STORE.get('admin:token')) || '';
+    return '';
+  }
+
   async fetch(req) {
     const url = new URL(req.url);
     const p = url.pathname;
@@ -36,7 +46,8 @@ export class Hub {
       if (p === '/login' && req.method === 'POST') return cors(await this.login(await req.json()));
       if (p === '/ws') return await this.connect(url, req);
       if (p.startsWith('/admin/')) {
-        if (!this.env.ADMIN_TOKEN || !same(req.headers.get('x-admin') || '', this.env.ADMIN_TOKEN))
+        const tok = await this.adminToken();
+        if (!tok || !same(req.headers.get('x-admin') || '', tok))
           return cors(json({ error: 'нямаш достъп' }, 401));
         const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
         if (p === '/admin/issue') return cors(await this.issue(body.plate));
@@ -280,19 +291,29 @@ function genPassword() {
   return [...r].map((x) => abc[x % abc.length]).join('');
 }
 
-const ADMIN_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS админ</title>
-<style>
+const STYLE = `<style>
 :root{--bg:#fff;--fg:#111;--mut:#666;--red:#d32f2f;--line:#ddd}
 @media (prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--mut:#999;--line:#333}}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;max-width:520px}
-h1{font-size:20px;color:var(--red)}input,button{font:inherit;padding:12px;border-radius:8px;border:1px solid var(--line);width:100%;box-sizing:border-box;margin:4px 0;background:var(--bg);color:var(--fg)}
-button{background:var(--red);color:#fff;border:0;font-weight:600}button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+h1{font-size:20px;color:var(--red)}input,button,a.btn{display:block;text-align:center;text-decoration:none;font:inherit;padding:12px;border-radius:8px;border:1px solid var(--line);width:100%;box-sizing:border-box;margin:4px 0;background:var(--bg);color:var(--fg)}
+button,a.btn{background:var(--red);color:#fff;border:0;font-weight:600}button.sec,a.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
 #out{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;min-height:20px}
 .pw{font:700 28px ui-monospace,monospace;letter-spacing:2px}.row{padding:8px 0;border-bottom:1px solid var(--line)}.mut{color:var(--mut);font-size:14px}
-</style></head><body>
+</style>`;
+
+const HOME_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS</title>${STYLE}</head><body>
+<h1>SOS — колега в беда</h1>
+<p>Паник бутон за таксиметрови шофьори в София. Тревогата стига до колегите в радиус 7 км.</p>
+<a class="btn" href="${APK_URL}">Свали приложението (Android)</a>
+<a class="btn sec" href="/admin">Админ — пароли за шофьори</a>
+<p class="mut">Не замества 112.</p>
+</body></html>`;
+
+const ADMIN_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS админ</title>${STYLE}</head><body>
 <h1>SOS — пароли за шофьори</h1>
-<input id="tok" type="password" placeholder="Админ токен">
+<input id="tok" type="password" placeholder="Админ токен (същият като на fish.taxi)">
 <input id="plate" placeholder="Рег. номер, напр. CA1234XX" autocapitalize="characters">
 <button onclick="issue()">Издай нова парола</button>
 <button class="sec" onclick="revoke()">Спри достъпа за този номер</button>
