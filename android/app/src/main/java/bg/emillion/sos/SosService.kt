@@ -5,9 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -27,6 +27,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.util.Locale
 
 class SosService : Service(), LocationListener {
     companion object {
@@ -53,6 +54,7 @@ class SosService : Service(), LocationListener {
 
     private val alerts = LinkedHashMap<String, JSONObject>()   // чужди тревоги около мен
     private val dismissed = HashSet<String>()
+    private val addr = HashMap<String, Triple<String, Double, Double>>() // id -> (адрес, lat, lon)
     private var myAlarm = false
 
     // ---------- живот ----------
@@ -74,7 +76,7 @@ class SosService : Service(), LocationListener {
         } catch (e: Exception) {
             running = false; stopSelf(); return
         }
-        overlay = Overlay(this, onHold = ::onHold, onGo = ::go, onDismiss = ::dismiss)
+        overlay = Overlay(this, onHold = ::onHold, onAction = ::onAction)
         overlay.showButton()
         startLocation()
         connect()
@@ -183,6 +185,7 @@ class SosService : Service(), LocationListener {
                 val id = m.getString("id")
                 val isNew = !alerts.containsKey(id)
                 alerts[id] = m
+                lookupAddress(id, m.optDouble("lat"), m.optDouble("lon"))
                 if (id in dismissed) return
                 if (isNew) { beep(); buzz() }
                 notifyAlert(m)
@@ -190,7 +193,7 @@ class SosService : Service(), LocationListener {
             }
             "cancel" -> {
                 val id = m.getString("id")
-                alerts.remove(id); dismissed.remove(id)
+                alerts.remove(id); dismissed.remove(id); addr.remove(id)
                 nm.cancel(id.hashCode())
                 refreshBanner()
             }
@@ -212,6 +215,35 @@ class SosService : Service(), LocationListener {
             "error" -> toast(m.optString("msg"))
             "kicked" -> out(m.optString("why", "Излязъл си"))
         }
+    }
+
+    /** Улица и номер по координатите. Пак се търси, ако колегата се е преместил над 150 м. */
+    private fun lookupAddress(id: String, lat: Double, lon: Double) {
+        val prev = addr[id]
+        if (prev != null) {
+            val r = FloatArray(1)
+            Location.distanceBetween(prev.second, prev.third, lat, lon, r)
+            if (r[0] < 150) return
+        }
+        addr[id] = Triple(prev?.first ?: "", lat, lon)
+        if (!Geocoder.isPresent()) return
+        Thread {
+            val text = try {
+                @Suppress("DEPRECATION")
+                val a = Geocoder(this, Locale("bg")).getFromLocation(lat, lon, 1)?.firstOrNull()
+                if (a == null) "" else listOfNotNull(
+                    a.thoroughfare?.let { s -> if (a.subThoroughfare != null) "$s ${a.subThoroughfare}" else s },
+                    a.subLocality ?: a.locality,
+                ).joinToString(", ").ifBlank { a.getAddressLine(0) ?: "" }
+            } catch (_: Exception) { "" }
+            main.post {
+                if (alerts.containsKey(id) && text.isNotBlank()) {
+                    addr[id] = Triple(text, lat, lon)
+                    alerts[id]?.let { if (it.getString("id") !in dismissed) notifyAlert(it) }
+                    refreshBanner()
+                }
+            }
+        }.start()
     }
 
     private fun out(why: String) {
@@ -239,25 +271,35 @@ class SosService : Service(), LocationListener {
         overlay.setAlarm(myAlarm)
     }
 
-    private fun go(id: String) {
+    private fun onAction(id: String, what: String) {
         val a = alerts[id] ?: return
-        send(JSONObject().put("t", "ack").put("id", id))
-        dismissed.add(id)
-        refreshBanner()
         val lat = a.optDouble("lat"); val lon = a.optDouble("lon")
-        val nav = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$lat,$lon")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try { startActivity(nav) } catch (_: ActivityNotFoundException) {
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            } catch (_: Exception) {}
+        when (what) {
+            "map" -> open(mapUri(lat, lon))
+            "waze", "gmaps" -> {
+                send(JSONObject().put("t", "ack").put("id", id)) // колегата вижда, че идваш
+                dismissed.add(id)
+                nm.cancel(id.hashCode())
+                refreshBanner()
+                if (what == "waze") open(wazeUri(lat, lon))
+                else if (!open(Uri.parse("google.navigation:q=$lat,$lon"))) open(gmapsDirUri(lat, lon))
+            }
+            "dismiss" -> {
+                dismissed.add(id)
+                nm.cancel(id.hashCode())
+                refreshBanner()
+            }
         }
     }
 
-    private fun dismiss(id: String) {
-        dismissed.add(id)
-        nm.cancel(id.hashCode())
-        refreshBanner()
-    }
+    private fun mapUri(lat: Double, lon: Double) = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon")
+    private fun wazeUri(lat: Double, lon: Double) = Uri.parse("https://waze.com/ul?ll=$lat,$lon&navigate=yes")
+    private fun gmapsDirUri(lat: Double, lon: Double) =
+        Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=driving")
+
+    private fun open(u: Uri): Boolean = try {
+        startActivity(Intent(Intent.ACTION_VIEW, u).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (_: Exception) { false }
 
     // ---------- показване ----------
     private fun active() = alerts.values.filter { it.getString("id") !in dismissed }
@@ -279,30 +321,37 @@ class SosService : Service(), LocationListener {
     }
 
     private fun info(a: JSONObject): String {
-        val km = String.format("%.1f", distanceKm(a))
+        val km = String.format(Locale.US, "%.1f", distanceKm(a))
         val mins = ((System.currentTimeMillis() - a.optLong("ts")) / 60_000).coerceAtLeast(0)
-        val car = listOf(a.optString("plate"), a.optString("model")).filter { it.isNotBlank() }.joinToString(" · ")
-        val firm = a.optString("op")
+        val car = listOf(a.optString("plate"), a.optString("model"), a.optString("op"))
+            .filter { it.isNotBlank() }.joinToString(" · ")
+        val where = addr[a.getString("id")]?.first?.takeIf { it.isNotBlank() }
+            ?: String.format(Locale.US, "%.5f, %.5f", a.optDouble("lat"), a.optDouble("lon"))
         val helpers = a.optInt("helpers")
         val h = if (helpers > 0) " · $helpers идват" else ""
-        return "$car\n$firm\n$km км · преди $mins мин$h"
+        return "$car\n$where · $km км · преди $mins мин$h"
     }
 
     private fun notifyAlert(a: JSONObject) {
+        val id = a.getString("id")
         val lat = a.optDouble("lat"); val lon = a.optDouble("lon")
-        val nav = PendingIntent.getActivity(
-            this, a.getString("id").hashCode(),
-            Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$lat,$lon")),
+        fun pi(u: Uri, code: Int) = PendingIntent.getActivity(
+            this, id.hashCode() * 4 + code,
+            Intent(Intent.ACTION_VIEW, u),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        nm.notify(a.getString("id").hashCode(), Notification.Builder(this, CH_ALERT)
+        val text = info(a)
+        nm.notify(id.hashCode(), Notification.Builder(this, CH_ALERT)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("SOS · Такси ${a.optInt("n")} има нужда от помощ")
-            .setStyle(Notification.BigTextStyle().bigText(info(a)))
-            .setContentText(info(a).replace('\n', ' '))
-            .setContentIntent(nav)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentText(text.replace('\n', ' '))
+            .setContentIntent(pi(mapUri(lat, lon), 0))
+            .addAction(Notification.Action.Builder(null, "Waze", pi(wazeUri(lat, lon), 1)).build())
+            .addAction(Notification.Action.Builder(null, "Google Maps", pi(gmapsDirUri(lat, lon), 2)).build())
             .setCategory(Notification.CATEGORY_ALARM)
             .setColor(0xFFD32F2F.toInt())
+            .setOnlyAlertOnce(true)
             .build())
     }
 
@@ -336,7 +385,7 @@ class SosService : Service(), LocationListener {
         } catch (_: Exception) {}
     }
 
-    // напомня с кратко писукане, докато не натиснеш „Тръгвам" или „✕"
+    // напомня с кратко писукане, докато не натиснеш Waze / Google Maps или ✕
     private val remind = object : Runnable {
         override fun run() {
             if (active().isNotEmpty()) { beep(); refreshBanner() }
