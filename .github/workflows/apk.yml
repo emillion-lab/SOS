@@ -1,6 +1,9 @@
 name: Build APK
-# Само ръчно, докато мине зелено — после се връща push тригер за android/**.
 on:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/apk.yml'
   workflow_dispatch:
 permissions:
   contents: write
