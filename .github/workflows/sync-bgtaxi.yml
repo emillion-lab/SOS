@@ -1,9 +1,11 @@
 name: Sync to bgtaxi
 # Кодът се поддържа тук; bgtaxi/SOS е публичното копие за шофьорите.
-# Иска secret BGTAXI_TOKEN (fine-grained токен на bgtaxi, само за bgtaxi/SOS:
-# Contents + Workflows = Read and write). Само ръчно, докато мине зелено.
+# Иска secret BGTAXI_TOKEN (токен на bgtaxi с право да пише в bgtaxi/SOS:
+# fine-grained Contents + Workflows = Read and write, или класически repo + workflow).
 on:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   sync:
     if: github.repository_owner == 'emillion-lab'
@@ -12,10 +14,37 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Diagnose token (никога не печата ключа)
+        env:
+          T: ${{ secrets.BGTAXI_TOKEN }}
+        run: |
+          R=/tmp/sync-report.txt
+          echo "== sync $(date -u) ==" > $R
+          if [ -z "$T" ]; then echo "secret BGTAXI_TOKEN: ЛИПСВА в emillion-lab/SOS" >> $R; exit 0; fi
+          echo "secret BGTAXI_TOKEN: има (дължина ${#T}, започва с ${T:0:4})" >> $R
+          curl -s -D /tmp/h -H "Authorization: Bearer $T" https://api.github.com/user \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('профил:',d.get('login'),'|',d.get('message',''))" >> $R
+          grep -iE "^(x-oauth-scopes|github-authentication-token-expiration):" /tmp/h >> $R || true
+          curl -s -H "Authorization: Bearer $T" https://api.github.com/repos/bgtaxi/SOS \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('bgtaxi/SOS права:',d.get('permissions'),'|',d.get('message',''))" >> $R
       - name: Push to bgtaxi/SOS
         env:
           T: ${{ secrets.BGTAXI_TOKEN }}
         run: |
-          [ -n "$T" ] || { echo "Липсва secret BGTAXI_TOKEN"; exit 1; }
-          git push --force "https://x-access-token:${T}@github.com/bgtaxi/SOS.git" HEAD:main
-          echo "Копирано: $(git rev-parse --short HEAD) → bgtaxi/SOS"
+          R=/tmp/sync-report.txt
+          [ -n "$T" ] || exit 1
+          if git push --force "https://x-access-token:${T}@github.com/bgtaxi/SOS.git" HEAD:main 2>&1 | sed "s/$T/***/g" | tee -a $R; then
+            [ "${PIPESTATUS[0]}" = 0 ] && echo "PUSH: OK $(git rev-parse --short HEAD)" >> $R || { echo "PUSH: FAIL" >> $R; exit 1; }
+          fi
+      - name: Save report
+        if: always()
+        run: |
+          cp /tmp/sync-report.txt /tmp/keep.txt
+          git config user.name sos-bot
+          git config user.email sos-bot@users.noreply.github.com
+          git checkout --orphan sync-report
+          git rm -rf --cached . > /dev/null
+          cp /tmp/keep.txt sync-report.txt
+          git add -f sync-report.txt
+          git commit -m "sync report [skip ci]"
+          git push -f origin sync-report
