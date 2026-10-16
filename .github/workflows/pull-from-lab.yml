@@ -1,0 +1,21 @@
+name: Pull from emillion-lab
+# Върви САМО в bgtaxi/SOS. Дърпа публичния код от emillion-lab/SOS и го записва тук
+# с secret BGTAXI_TOKEN на bgtaxi (нужни права: repo + workflow).
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+jobs:
+  pull:
+    if: github.repository_owner == 'bgtaxi'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror emillion-lab/SOS → bgtaxi/SOS
+        env:
+          T: ${{ secrets.BGTAXI_TOKEN }}
+        run: |
+          [ -n "$T" ] || { echo "Липсва secret BGTAXI_TOKEN в bgtaxi/SOS"; exit 1; }
+          git clone --quiet https://github.com/emillion-lab/SOS.git src
+          cd src
+          git push --force "https://x-access-token:${T}@github.com/bgtaxi/SOS.git" HEAD:main 2>&1 | sed "s/$T/***/g"
+          echo "Копирано: $(git rev-parse --short HEAD)"
