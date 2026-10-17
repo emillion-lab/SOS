@@ -18,29 +18,37 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.abs
 
+/** Бутон в картата над приложенията. */
+data class Btn(val label: String, val color: Int, val action: () -> Unit)
+
 /**
- * Три прозореца над всички приложения:
- *  - плаващ бутон SOS (влачи се; задържане 2 сек = тревога / спиране на тревогата)
- *  - мигаща червена рамка по края на екрана — не приема докосвания, всичко отдолу работи
- *  - малка лента горе: кой е колегата, адрес, разстояние и бутони Карта / Waze / Google Maps / ✕
+ * Прозорци над всички приложения:
+ *  - плаващ бутон SOS (влачи се; задържане 2 сек = тревога / спиране на моята тревога)
+ *  - мигаща червена рамка по края — не приема докосвания, всичко отдолу работи
+ *  - карта горе: или моята тревога (запис, точна локация, 112, спри), или чужда (чуй, карта, навигация)
  */
-class Overlay(
-    private val ctx: Context,
-    private val onHold: () -> Unit,
-    /** action: "map", "waze", "gmaps", "dismiss" */
-    private val onAction: (String, String) -> Unit,
-) {
+class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
+    companion object {
+        const val GREEN = 0xFF2E7D32.toInt()
+        const val BLUE = 0xFF1E88E5.toInt()
+        const val WAZE = 0xFF33CCFF.toInt()
+        const val GLASS = 0x55FFFFFF
+        const val DARK = 0x33000000
+    }
+
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val d = ctx.resources.displayMetrics.density
     private val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     private var button: TextView? = null
     private var border: BorderView? = null
-    private var banner: LinearLayout? = null
-    private var bannerTitle: TextView? = null
-    private var bannerInfo: TextView? = null
-    private var bannerId: String? = null
+    private var card: LinearLayout? = null
+    private var cardTitle: TextView? = null
+    private var cardInfo: TextView? = null
+    private var cardSig: String? = null
+    private var current: List<List<Btn>> = emptyList()
     private var alarmOn = false
+    private var helpers = 0
 
     private fun px(v: Int) = (v * d).toInt()
     fun allowed() = Settings.canDrawOverlays(ctx)
@@ -58,16 +66,11 @@ class Overlay(
             gravity = Gravity.CENTER
         }
         paintButton(v, false)
-        val lp = WindowManager.LayoutParams(
-            size, size, type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
+        val lp = WindowManager.LayoutParams(size, size, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
             x = px(12)
-            y = px(260)
+            y = px(320)
         }
-
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0
         var dragging = false
         val hold2 = Runnable { if (!dragging) { v.text = "…"; onHold() } }
@@ -108,12 +111,11 @@ class Overlay(
         }
     }
 
-    private var helpers = 0
     private fun restoreLabel(v: TextView) {
         v.text = if (alarmOn) (if (helpers > 0) "СТОП\n$helpers↗" else "СТОП") else "SOS"
     }
 
-    /** Моята тревога е пусната / спряна. helpers = колко колеги са тръгнали. */
+    /** Моята тревога е пусната / спряна. helpers = колко идват. */
     fun setAlarm(on: Boolean, helpersNow: Int = 0) {
         alarmOn = on; helpers = helpersNow
         button?.let { paintButton(it, on); restoreLabel(it) }
@@ -125,15 +127,10 @@ class Overlay(
         val v = BorderView(ctx, px(10).toFloat())
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
-        ).apply {
-            // Android 12+ пропуска докосванията през чужд прозорец само ако е ≤ 0.8 непрозрачен
-            alpha = 0.8f
-        }
+        ).apply { alpha = 0.8f } // Android 12+ пропуска докосванията само през ≤ 0.8 непрозрачен прозорец
         try { wm.addView(v, lp); border = v } catch (_: Exception) {}
     }
 
@@ -142,76 +139,62 @@ class Overlay(
         border = null
     }
 
-    // ---------- лента ----------
-    fun showBanner(id: String, title: String, info: String) {
+    // ---------- карта ----------
+    /**
+     * Показва или обновява картата горе. rows = редове бутони. Ако наборът бутони е същият,
+     * се сменя само текстът — без премигване.
+     */
+    fun showCard(title: String, info: String, rows: List<List<Btn>>, bg: Int = 0xF0B71C1C.toInt()) {
         if (!allowed()) return
-        bannerId = id
-        if (banner == null) {
-            val t = TextView(ctx).apply { setTextColor(Color.WHITE); textSize = 16f; typeface = Typeface.DEFAULT_BOLD }
-            val x = pill("✕", 0x55FFFFFF) { act("dismiss") }
-            val head = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(t, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(x)
-            }
-            val i = TextView(ctx).apply {
-                setTextColor(0xFFFFE0E0.toInt()); textSize = 13f
-                setPadding(0, px(4), 0, px(8))
-            }
-            val buttons = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(pill("📍 Карта", 0x55FFFFFF, weight = true) { act("map") })
-                addView(pill("Waze", 0xFF33CCFF.toInt(), weight = true) { act("waze") })
-                addView(pill("Google Maps", 0xFF2E7D32.toInt(), weight = true) { act("gmaps") })
-            }
-            val box = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(px(14), px(10), px(10), px(10))
-                background = GradientDrawable().apply { setColor(0xF0B71C1C.toInt()); cornerRadius = px(14).toFloat() }
-                addView(head); addView(i); addView(buttons)
-            }
-            val lp = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT,
-            ).apply {
-                gravity = Gravity.TOP
-                y = px(36)
-                horizontalMargin = 0.03f
-            }
-            try { wm.addView(box, lp); banner = box; bannerTitle = t; bannerInfo = i } catch (_: Exception) { return }
+        val sig = rows.joinToString("|") { r -> r.joinToString(",") { it.label } } + bg
+        current = rows
+        if (card != null && sig == cardSig) {
+            cardTitle?.text = title; cardInfo?.text = info
+            return
         }
-        bannerTitle?.text = title
-        bannerInfo?.text = info
+        hideCard()
+        current = rows
+        val t = TextView(ctx).apply { setTextColor(Color.WHITE); textSize = 16f; typeface = Typeface.DEFAULT_BOLD; text = title }
+        val i = TextView(ctx).apply { setTextColor(0xFFFFE0E0.toInt()); textSize = 13f; setPadding(0, px(4), 0, px(6)); text = info }
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(14), px(10), px(10), px(10))
+            background = GradientDrawable().apply { setColor(bg); cornerRadius = px(14).toFloat() }
+            addView(t); addView(i)
+        }
+        rows.forEachIndexed { ri, row ->
+            val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(3), 0, px(3)) }
+            row.forEachIndexed { bi, b -> line.addView(pill(b.label, b.color) { current.getOrNull(ri)?.getOrNull(bi)?.action?.invoke() }) }
+            box.addView(line)
+        }
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT,
+        ).apply { gravity = Gravity.TOP; y = px(36); horizontalMargin = 0.03f }
+        try { wm.addView(box, lp); card = box; cardTitle = t; cardInfo = i; cardSig = sig } catch (_: Exception) {}
     }
 
-    private fun act(what: String) { bannerId?.let { onAction(it, what) } }
-
-    fun hideBanner() {
-        banner?.let { try { wm.removeView(it) } catch (_: Exception) {} }
-        banner = null; bannerTitle = null; bannerInfo = null; bannerId = null
+    fun hideCard() {
+        card?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        card = null; cardTitle = null; cardInfo = null; cardSig = null
     }
 
     fun removeAll() {
-        hideBanner(); hideBorder()
+        hideCard(); hideBorder()
         button?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         button = null
     }
 
-    private fun pill(label: String, color: Int, weight: Boolean = false, click: () -> Unit) = TextView(ctx).apply {
+    private fun pill(label: String, color: Int, click: () -> Unit) = TextView(ctx).apply {
         text = label
         setTextColor(Color.WHITE)
         textSize = 14f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
-        setPadding(px(10), px(10), px(10), px(10))
+        setPadding(px(8), px(10), px(8), px(10))
         background = GradientDrawable().apply { setColor(color); cornerRadius = px(20).toFloat() }
         setOnClickListener { click() }
-        layoutParams = if (weight)
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = px(3); rightMargin = px(3) }
-        else
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = px(6) }
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = px(3); rightMargin = px(3) }
     }
 }
 
