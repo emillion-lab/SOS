@@ -39,6 +39,11 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
         super.onRequestPermissionsResult(code, perms, res)
+        // Микрофонът влиза в услугата само при старт — рестарт, ако тя вече върви
+        if (code == 3 && has(Manifest.permission.RECORD_AUDIO) && SosService.running) {
+            stopService(Intent(this, SosService::class.java))
+            root.postDelayed({ startForegroundService(Intent(this, SosService::class.java)); render() }, 600)
+        }
         render()
     }
 
@@ -100,9 +105,6 @@ class MainActivity : Activity() {
                 startForegroundService(Intent(this, SosService::class.java))
                 root.postDelayed({ render() }, 800)
             }
-        }
-        if (SosService.running && !mic) {
-            text("Микрофонът е разрешен след включването — спри и включи отново, за да работи записът.", 13f, color = Color.GRAY)
         }
         space()
         button("📞 112", secondary = true) {

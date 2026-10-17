@@ -43,6 +43,7 @@ class SosService : Service(), LocationListener {
         private const val CH_RUN = "run"
         private const val CH_ALERT = "alert"
         private const val NOTIF_RUN = 1
+        private const val NOTIF_MINE = 3
         private const val REC_MAX_MS = 20_000
     }
 
@@ -133,6 +134,7 @@ class SosService : Service(), LocationListener {
         ws?.close(1000, null)
         if (::overlay.isInitialized) overlay.removeAll()
         alerts.keys.forEach { nm.cancel(it.hashCode()) }
+        nm.cancel(NOTIF_MINE)
         super.onDestroy()
     }
 
@@ -295,7 +297,7 @@ class SosService : Service(), LocationListener {
             }
             "falseNoted" -> toast("Отбелязано като фалшива тревога")
             "error" -> {
-                if (minePending) { minePending = false; stopRecording(send = false); refresh() }
+                if (minePending) { minePending = false; stopRecording(send = false); nm.cancel(NOTIF_MINE); refresh() }
                 toast(m.optString("msg"))
             }
             "kicked" -> out(m.optString("why", "Излязъл си"))
@@ -336,6 +338,7 @@ class SosService : Service(), LocationListener {
     private fun clearMine() {
         stopRecording(send = false)
         mine = false; minePending = false; pendingAudio = null
+        nm.cancel(NOTIF_MINE)
         overlay.setAlarm(false)
         refresh()
     }
@@ -485,6 +488,7 @@ class SosService : Service(), LocationListener {
     }
 
     private fun showMine() {
+        notifyMine()
         val head = if (mine) "🔴 Тревога · стигна до $mineReached" else "🔴 Изпраща тревогата…"
         val voice = recorder?.let {
             val s = ((System.currentTimeMillis() - recStart) / 1000).coerceAtMost(20)
@@ -497,6 +501,7 @@ class SosService : Service(), LocationListener {
         val r1 = mutableListOf<Btn>()
         if (recorder != null) r1.add(Btn("⏹ Прати гласа", Overlay.BLUE) { stopRecording(send = true) })
         else if (hasMic()) r1.add(Btn("🎙 Нов запис", Overlay.GLASS) { if (mine || minePending) startRecording(); refresh() })
+        else r1.add(Btn("🎙 Разреши микрофон", Overlay.BLUE) { openAppForMic() })
         r1.add(Btn(if (mineExact) "📍 Само района" else "📍 Покажи точно", Overlay.GLASS) {
             send(JSONObject().put("t", "exact").put("on", !mineExact))
         })
@@ -591,6 +596,26 @@ class SosService : Service(), LocationListener {
         .build()
 
     private fun openApp() = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+
+    private fun openAppForMic() {
+        toast("Разреши „Микрофон“ — приложението ще се рестартира само")
+        try { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+    }
+
+    /** Известие и при този, който е пуснал тревогата — потвърждение, че е тръгнала. */
+    private fun notifyMine() {
+        if (!mine && !minePending) { nm.cancel(NOTIF_MINE); return }
+        val head = if (mine) "Тревогата е пусната · стигна до $mineReached" else "Изпраща тревогата…"
+        val sub = if (mineHelpers > 0) "Идват: $mineHelpers · последно $mineLastHelper" else "Още никой не е тръгнал"
+        nm.notify(NOTIF_MINE, Notification.Builder(this, CH_RUN)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("🔴 $head")
+            .setContentText(sub)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openApp())
+            .build())
+    }
 
     // ---------- звук и вибрация: тихо, за да не плаши околните ----------
     private fun beep() {
