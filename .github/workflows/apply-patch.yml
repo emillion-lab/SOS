@@ -1,0 +1,37 @@
+name: Apply patch
+# Качи кръпка (git diff) като patches/<име>.patch → тя се прилага върху main, комитва се
+# и файлът с кръпката се трие. При неуспех нищо не се пипа, а причината е в patches/<име>.failed.
+# Пипа само код (не .github/workflows — GITHUB_TOKEN няма това право).
+on:
+  push:
+    paths: ['patches/*.patch']
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository_owner == 'emillion-lab'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply
+        run: |
+          git config user.name sos-bot
+          git config user.email sos-bot@users.noreply.github.com
+          shopt -s nullglob
+          for p in patches/*.patch; do
+            name=$(basename "$p" .patch)
+            if git apply --check "$p" 2> "patches/$name.failed"; then
+              git apply "$p"
+              rm -f "patches/$name.failed"
+              git rm -q "$p"
+              git add -A
+              git commit -q -m "patch: $name"
+              echo "приложена: $name"
+            else
+              echo "НЕ се прилага: $name"; cat "patches/$name.failed"
+              git rm -q "$p"
+              git add "patches/$name.failed"
+              git commit -q -m "patch failed: $name"
+            fi
+          done
+          git push
