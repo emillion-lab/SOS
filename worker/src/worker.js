@@ -23,7 +23,6 @@ export default {
     if (url.pathname === '/health') return json({ ok: true, v: 3 });
     if (url.pathname === '/' && req.method === 'GET') return html(HOME_HTML);
     if (url.pathname === '/SOS.apk') return Response.redirect(APK_URL, 302);
-    if (url.pathname === '/admin' && req.method === 'GET') return html(ADMIN_HTML);
     return env.HUB.get(env.HUB.idFromName('sofia')).fetch(req);
   },
 };
@@ -35,11 +34,12 @@ export class Hub {
     this.db = state.storage;
   }
 
-  // Същият админ токен като на fish.taxi: secret ADMIN_TOKEN, иначе KV admin:token в GPS_STORE
+  // Собствен админ ключ на SOS (Worker secret SOS_ADMIN_TOKEN), отделен от fish.taxi.
+  // Създава се от mvr-worker → sos-admin-token.yml; копие има в Cloudflare KV sos-signing → admin-token.
+  // Без него админ API-то е изключено.
   async adminToken() {
-    if (this.env.ADMIN_TOKEN) return this.env.ADMIN_TOKEN;
-    if (this.env.GPS_STORE) return (await this.env.GPS_STORE.get('admin:token')) || '';
-    return '';
+    const t = this.env.SOS_ADMIN_TOKEN || '';
+    return t.length >= 32 ? t : '';
   }
 
   async fetch(req) {
@@ -52,7 +52,8 @@ export class Hub {
       if (p === '/ws') return await this.connect(url, req);
       if (p.startsWith('/admin/')) {
         const tok = await this.adminToken();
-        if (!tok || !same(req.headers.get('x-admin') || '', tok)) return cors(json({ error: 'нямаш достъп' }, 401));
+        if (!tok) return cors(json({ error: 'админ ключът не е настроен' }, 503));
+        if (!same(req.headers.get('x-admin') || '', tok)) return cors(json({ error: 'нямаш достъп' }, 401));
         const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
         if (p === '/admin/list') return cors(await this.adminList());
         if (p === '/admin/block') return cors(await this.adminBlock(body));
@@ -399,36 +400,4 @@ const HOME_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
 <p>Паник бутон за всеки, без регистрация. Тревогата стига веднага до хората наоколо с приложението, в радиус 7 км. Можеш да оставиш гласово съобщение и да избереш дали да покажеш точното място или само района.</p>
 <a class="btn" href="/SOS.apk">Свали приложението (Android)</a>
 <p class="mut">При непосредствена опасност звънни на 112. Приложението не е спешна служба и не гарантира, че някой ще дойде.</p>
-<a class="btn sec" href="/admin">Админ</a>
 </body></html>`;
-
-const ADMIN_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS админ</title>${STYLE}</head><body>
-<h1>SOS — админ</h1>
-<input id="tok" type="password" placeholder="Админ токен (същият като на fish.taxi)">
-<button onclick="load()">Обнови</button>
-<div id="sum" class="mut"></div>
-<h2>Активни тревоги</h2><div id="active"></div>
-<h2>Устройства</h2><div id="devs"></div>
-<h2>Дневник (30 дни)</h2><div id="log"></div>
-<script>
-const $=id=>document.getElementById(id);
-try{$('tok').value=localStorage.getItem('sosAdmin')||''}catch(e){}
-const t=ms=>ms?new Date(ms).toLocaleString('bg-BG'):'—';
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function call(path,body){
-  try{localStorage.setItem('sosAdmin',$('tok').value)}catch(e){}
-  const r=await fetch(path,{method:body?'POST':'GET',headers:{'content-type':'application/json','x-admin':$('tok').value},body:body?JSON.stringify(body):undefined});
-  return r.json();
-}
-const REASON={cancelled:'спряна',expired:'изтекла',false:'фалшива (3 сигнала)',blocked:'блокирано'};
-async function load(){
-  const j=await call('/admin/list');
-  if(j.error){$('sum').textContent=j.error;return}
-  $('sum').textContent='На линия: '+j.online+' · Устройства: '+j.devices.length;
-  $('active').innerHTML=j.active.map(a=>'<div class="row"><span>🔴 Помощ '+a.n+' · '+t(a.ts)+'<div class="mut">'+(a.exact?'точно място':'само района')+(a.audio?' · 🎙':'')+' · идват '+a.helpers+' · фалшива '+a.falses+'</div></span></div>').join('')||'<div class="mut">няма</div>';
-  $('devs').innerHTML=j.devices.map(d=>'<div class="row"><span>'+(d.online?'🟢':'⚪')+' Помощ '+d.n+(d.blocked?' ⛔':'')+(d.mutedUntil>Date.now()?' 🔇 до '+t(d.mutedUntil):'')+'<div class="mut">последно '+t(d.last)+' · тревоги '+d.alarms+'</div></span><button class="mini '+(d.blocked?'sec':'')+'" onclick="blk('+d.n+','+(!d.blocked)+')">'+(d.blocked?'Пусни':'Блокирай')+'</button></div>').join('');
-  $('log').innerHTML=j.log.map(l=>'<div class="row"><span>Помощ '+l.n+' · '+t(l.ts)+'<div class="mut">'+esc(REASON[l.reason]||l.reason)+' · '+Math.round((l.end-l.ts)/60000)+' мин · '+(l.exact?'точно':'район')+(l.audio?' · 🎙':'')+' · идваха '+l.helpers+' · фалшива '+l.falses+'</div></span></div>').join('')||'<div class="mut">празно</div>';
-}
-async function blk(n,b){if(b&&!confirm('Блокираш Помощ '+n+'?'))return;const j=await call('/admin/block',{n,blocked:b});if(j.error)alert(j.error);load();}
-</script></body></html>`;
