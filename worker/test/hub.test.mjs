@@ -24,7 +24,7 @@ class WS {
   last(t) { return [...this.inbox].reverse().find((x) => x.t === t); }
 }
 const sockets = [];
-const hub = new Hub({ storage: new DB(), getWebSockets: () => sockets }, { ADMIN_TOKEN: 'adm' });
+const hub = new Hub({ storage: new DB(), getWebSockets: () => sockets }, { SOS_ADMIN_TOKEN: 'adm'.repeat(11) });
 const req = (path, body) => new Request('https://x' + path, { method: 'POST', body: JSON.stringify(body), headers: { 'cf-connecting-ip': '1.2.3.4', 'content-type': 'application/json' } });
 
 async function phone(device, lat, lon) {
@@ -111,11 +111,11 @@ const dAlerts = D.inbox.filter((x) => x.t === 'alert' && x.n === B.n);
 check(dAlerts.length === 0, 'D е изключил получаването и не получава');
 
 // админ
-const list = await (await hub.fetch(new Request('https://x/admin/list', { headers: { 'x-admin': 'adm' } }))).json();
+const list = await (await hub.fetch(new Request('https://x/admin/list', { headers: { 'x-admin': 'adm'.repeat(11) } }))).json();
 check(list.devices.length === 5 && list.log.length === 2 && list.active.length === 1, 'админ: 5 устройства, 2 в дневника, 1 активна');
 check(!JSON.stringify(list.log).includes('42.6'), 'дневникът е без координати');
 check((await hub.fetch(new Request('https://x/admin/list'))).status === 401, 'админ без токен → 401');
-await hub.fetch(new Request('https://x/admin/block', { method: 'POST', headers: { 'x-admin': 'adm' }, body: JSON.stringify({ n: B.n, blocked: true }) }));
+await hub.fetch(new Request('https://x/admin/block', { method: 'POST', headers: { 'x-admin': 'adm'.repeat(11) }, body: JSON.stringify({ n: B.n, blocked: true }) }));
 check(B.last('kicked') && C.last('cancel'), 'блокиран B е изхвърлен, тревогата му спряна');
 check((await hub.fetch(req('/register', { device: 'bbbb2222' }))).status === 403, 'блокираният не може да влезе отново');
 
