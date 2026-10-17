@@ -34,7 +34,23 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        askAllOnce()
         render()
+    }
+
+    /** При първо отваряне иска наведнъж всички права, вкл. микрофона — без него няма гласово съобщение. */
+    private fun askAllOnce() {
+        val sp = getSharedPreferences("sos", MODE_PRIVATE)
+        if (sp.getBoolean("askedAll", false)) return
+        sp.edit().putBoolean("askedAll", true).apply()
+        askMissing()
+    }
+
+    private fun askMissing() {
+        val want = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) want.add(Manifest.permission.POST_NOTIFICATIONS)
+        val missing = want.filter { !has(it) }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 3)
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
@@ -101,6 +117,7 @@ class MainActivity : Activity() {
             }
         } else {
             button("Включи") {
+                if (!loc || !mic) { askMissing() }
                 if (!loc) { toast("Първо разреши локация"); return@button }
                 startForegroundService(Intent(this, SosService::class.java))
                 root.postDelayed({ render() }, 800)

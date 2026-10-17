@@ -73,20 +73,22 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
         }
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0
         var dragging = false
-        val hold2 = Runnable { if (!dragging) { v.text = "…"; onHold() } }
-        val hold1 = Runnable { if (!dragging) v.text = "1" }
+        // Броячът е в балонче НАД бутона — под пръста не се вижда. Точно 2 сек: „2" → „1" → тревога.
+        val fire = Runnable { if (!dragging) { hideBubble(); v.text = "…"; onHold() } }
+        val tick1 = Runnable { if (!dragging) showBubble(lp, if (alarmOn) "Спира след 1" else "1") }
         v.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; dragging = false
-                    v.text = "2"
-                    v.postDelayed(hold1, 1000); v.postDelayed(hold2, 2000)
+                    showBubble(lp, if (alarmOn) "Спира след 2" else "2")
+                    v.postDelayed(tick1, 1000); v.postDelayed(fire, 2000)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX; val dy = e.rawY - downY
                     if (!dragging && (abs(dx) > px(10) || abs(dy) > px(10))) {
                         dragging = true
-                        v.removeCallbacks(hold1); v.removeCallbacks(hold2)
+                        v.removeCallbacks(tick1); v.removeCallbacks(fire)
+                        hideBubble()
                     }
                     if (dragging) {
                         lp.x = startX + dx.toInt(); lp.y = startY + dy.toInt()
@@ -94,13 +96,47 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.removeCallbacks(hold1); v.removeCallbacks(hold2)
+                    v.removeCallbacks(tick1); v.removeCallbacks(fire)
+                    hideBubble()
                     restoreLabel(v)
                 }
             }
             true
         }
         try { wm.addView(v, lp); button = v } catch (_: Exception) {}
+    }
+
+    // ---------- балонче с брояча над бутона ----------
+    private var bubble: TextView? = null
+
+    private fun showBubble(at: WindowManager.LayoutParams, text: String) {
+        if (!allowed()) return
+        val b = bubble ?: TextView(ctx).apply {
+            setTextColor(Color.WHITE)
+            textSize = 28f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(px(18), px(6), px(18), px(6))
+            background = GradientDrawable().apply { setColor(0xE6B71C1C.toInt()); cornerRadius = px(24).toFloat() }
+        }
+        b.text = text
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = at.x
+            y = (at.y - px(70)).coerceAtLeast(0) // над пръста
+        }
+        try {
+            if (bubble == null) { wm.addView(b, lp); bubble = b } else wm.updateViewLayout(b, lp)
+        } catch (_: Exception) {}
+    }
+
+    private fun hideBubble() {
+        bubble?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+        bubble = null
     }
 
     private fun paintButton(v: TextView, alarm: Boolean) {
@@ -180,7 +216,7 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
     }
 
     fun removeAll() {
-        hideCard(); hideBorder()
+        hideCard(); hideBorder(); hideBubble()
         button?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         button = null
     }
