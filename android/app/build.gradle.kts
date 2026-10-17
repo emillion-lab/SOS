@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Постоянен ключ за подписване: подава се от workflow-а (никога не е в репото).
+// Без него билдът е с временен debug ключ — става за проба, но ANDROID_ID и
+// обновяването отгоре зависят от един и същ ключ.
+val ksFile: String? = System.getenv("SOS_KEYSTORE_FILE")
+val ksPass: String? = System.getenv("SOS_KEYSTORE_PASS")
+
 android {
     namespace = "bg.emillion.sos"
     compileSdk = 34
@@ -11,9 +17,25 @@ android {
         applicationId = "bg.emillion.sos"
         minSdk = 26
         targetSdk = 34
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // ГГММДДЧЧ — расте винаги, независимо в кое репо е билдът
+        val ver = System.getenv("SOS_VERSION_CODE") ?: System.getenv("GITHUB_RUN_NUMBER") ?: "1"
+        versionCode = ver.toInt()
+        versionName = "0.3.$ver"
         buildConfigField("String", "SERVER", "\"https://sos.mihov-emil.workers.dev\"")
+    }
+    signingConfigs {
+        if (ksFile != null && ksPass != null) create("fixed") {
+            storeFile = file(ksFile)
+            storePassword = ksPass
+            keyAlias = "sos"
+            keyPassword = ksPass
+            storeType = "PKCS12"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            if (ksFile != null && ksPass != null) signingConfig = signingConfigs.getByName("fixed")
+        }
     }
     buildFeatures { buildConfig = true }
     compileOptions {
