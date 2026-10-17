@@ -22,7 +22,7 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === '/health') return json({ ok: true, v: 3 });
     if (url.pathname === '/' && req.method === 'GET') return html(HOME_HTML);
-    if (url.pathname === '/SOS.apk') return Response.redirect(APK_URL, 302);
+    if (url.pathname === '/SOS.apk') return apk();
     return env.HUB.get(env.HUB.idFromName('sofia')).fetch(req);
   },
 };
@@ -343,6 +343,24 @@ export class Hub {
   }
 }
 
+// ---------- сваляне на APK ----------
+// Сървърът взима файла от GitHub и го подава директно. Иначе на телефона линкът към
+// github.com се отваря в приложението GitHub, което иска вход, преди да свали.
+async function apk() {
+  try {
+    const r = await fetch(APK_URL, { redirect: 'follow', cf: { cacheTtl: 300, cacheEverything: true } });
+    if (!r.ok) throw new Error('GitHub ' + r.status);
+    return new Response(r.body, { headers: {
+      'content-type': 'application/vnd.android.package-archive',
+      'content-disposition': 'attachment; filename="SOS.apk"',
+      'cache-control': 'public, max-age=300',
+      ...(r.headers.get('content-length') ? { 'content-length': r.headers.get('content-length') } : {}),
+    } });
+  } catch (e) {
+    return html('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">Приложението не може да се свали в момента. Опитай след минута.</p>', 502);
+  }
+}
+
 // ---------- позиция за получателите ----------
 // „Само района": центърът на клетка ~300×300 м. Стабилна клетка, а не случаен шум —
 // иначе с много обновявания средното издава точната точка.
@@ -365,7 +383,7 @@ function km(a, b) {
 }
 function send(ws, o) { try { ws.send(JSON.stringify(o)); } catch {} }
 function json(o, status = 200) { return new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } }); }
-function html(s) { return new Response(s, { headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } }); }
+function html(s, status = 200) { return new Response(s, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } }); }
 function cors(r) {
   const h = new Headers(r.headers);
   h.set('access-control-allow-origin', '*');
