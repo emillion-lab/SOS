@@ -1,0 +1,468 @@
+diff --git a/android/app/src/main/java/bg/emillion/sos/Core.kt b/android/app/src/main/java/bg/emillion/sos/Core.kt
+index 3b9aa01..35e4a2a 100644
+--- a/android/app/src/main/java/bg/emillion/sos/Core.kt
++++ b/android/app/src/main/java/bg/emillion/sos/Core.kt
+@@ -11,4 +11,14 @@ import org.json.JSONObject
+ import java.security.SecureRandom
++import java.util.Locale
+ import java.util.concurrent.TimeUnit
+ 
++/** Езикът следва телефона: български, ако е на български, иначе английски. */
++object Lang {
++    val bg: Boolean get() = Locale.getDefault().language == "bg"
++    val code: String get() = if (bg) "bg" else "en"
++}
++
++/** Текст на езика на телефона. */
++fun tr(bg: String, en: String): String = if (Lang.bg) bg else en
++
+ object Prefs {
+@@ -57,3 +67,3 @@ object Net {
+ 
+-    val wsUrl: String get() = BuildConfig.SERVER.replaceFirst("https", "wss") + "/ws?token="
++    val wsUrl: String get() = BuildConfig.SERVER.replaceFirst("https", "wss") + "/ws?lang=" + Lang.code + "&token="
+ 
+@@ -61,3 +71,3 @@ object Net {
+     fun register(device: String): JSONObject {
+-        val body = JSONObject().put("device", device).toString().toRequestBody("application/json".toMediaType())
++        val body = JSONObject().put("device", device).put("lang", Lang.code).toString().toRequestBody("application/json".toMediaType())
+         val req = Request.Builder().url(BuildConfig.SERVER + "/register").post(body).build()
+@@ -65,3 +75,3 @@ object Net {
+             val j = JSONObject(r.body?.string() ?: "{}")
+-            if (!r.isSuccessful) throw HttpError(r.code, j.optString("error", "Грешка " + r.code))
++            if (!r.isSuccessful) throw HttpError(r.code, j.optString("error", tr("Грешка ", "Error ") + r.code))
+             return j
+diff --git a/android/app/src/main/java/bg/emillion/sos/MainActivity.kt b/android/app/src/main/java/bg/emillion/sos/MainActivity.kt
+index 43fc9b6..1625769 100644
+--- a/android/app/src/main/java/bg/emillion/sos/MainActivity.kt
++++ b/android/app/src/main/java/bg/emillion/sos/MainActivity.kt
+@@ -68,4 +68,4 @@ class MainActivity : Activity() {
+         val n = Prefs.n(this)
+-        text(if (n > 0) "SOS · Помощ $n" else "SOS — помощ наоколо", 26f, bold = true, color = RED)
+-        text("Задръж червения бутон 2 сек → тревогата тръгва веднага до хората наоколо (7 км) и започва запис на глас до 20 сек.", 15f)
++        text(if (n > 0) tr("SOS · Помощ $n", "SOS · Help $n") else tr("SOS — помощ наоколо", "SOS — help nearby"), 26f, bold = true, color = RED)
++        text(tr("Задръж червения бутон 2 сек → тревогата тръгва веднага до хората наоколо (7 км) и започва запис на глас до 20 сек.", "Hold the red button for 2 sec → the alarm goes out at once to people nearby (7 km) and a voice recording of up to 20 sec starts."), 15f)
+         space()
+@@ -73,9 +73,9 @@ class MainActivity : Activity() {
+         // ---------- настройки на тревогата ----------
+-        text("При тревога", 18f, bold = true)
+-        check("Давай точна локация", Prefs.exact(this),
+-            "Изключено: виждат само района (~300 м). Можеш да я включиш и по време на тревогата.") {
++        text(tr("При тревога", "During an alarm"), 18f, bold = true)
++        check(tr("Давай точна локация", "Share exact location"), Prefs.exact(this),
++            tr("Изключено: виждат само района (~300 м). Можеш да я включиш и по време на тревогата.", "Off: others see only the area (~300 m). You can turn it on during the alarm too.")) {
+             Prefs.setExact(this, it)
+         }
+-        check("След гласовото съобщение отвори 112", Prefs.call112(this), null) { Prefs.setCall112(this, it) }
+-        check("Получавай тревоги от други", Prefs.receive(this), null) {
++        check(tr("След гласовото съобщение отвори 112", "Open 112 after the voice message"), Prefs.call112(this), null) { Prefs.setCall112(this, it) }
++        check(tr("Получавай тревоги от други", "Receive alarms from others"), Prefs.receive(this), null) {
+             Prefs.setReceive(this, it)
+@@ -86,3 +86,3 @@ class MainActivity : Activity() {
+         // ---------- разрешения ----------
+-        text("Разрешения", 18f, bold = true)
++        text(tr("Разрешения", "Permissions"), 18f, bold = true)
+         val loc = has(Manifest.permission.ACCESS_FINE_LOCATION)
+@@ -94,15 +94,15 @@ class MainActivity : Activity() {
+ 
+-        perm("Локация", loc) {
++        perm(tr("Локация", "Location"), loc) {
+             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 1)
+         }
+-        perm("Микрофон (за гласовото съобщение)", mic) {
++        perm(tr("Микрофон (за гласовото съобщение)", "Microphone (for the voice message)"), mic) {
+             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 3)
+         }
+-        perm("Известия", notif) {
++        perm(tr("Известия", "Notifications"), notif) {
+             if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+         }
+-        perm("Бутон над приложенията", overlay) {
++        perm(tr("Бутон над приложенията", "Button over other apps"), overlay) {
+             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+         }
+-        perm("Без спиране от батерията", battery) {
++        perm(tr("Без спиране от батерията", "Not stopped by battery saver"), battery) {
+             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+@@ -112,4 +112,4 @@ class MainActivity : Activity() {
+         if (SosService.running) {
+-            text("● На линия", 16f, bold = true, color = GREEN)
+-            button("Спри") {
++            text(tr("● На линия", "● Online"), 16f, bold = true, color = GREEN)
++            button(tr("Спри", "Stop")) {
+                 stopService(Intent(this, SosService::class.java))
+@@ -118,5 +118,5 @@ class MainActivity : Activity() {
+         } else {
+-            button("Включи") {
++            button(tr("Включи", "Turn on")) {
+                 if (!loc || !mic) { askMissing() }
+-                if (!loc) { toast("Първо разреши локация"); return@button }
++                if (!loc) { toast(tr("Първо разреши локация", "Allow location first")); return@button }
+                 startForegroundService(Intent(this, SosService::class.java))
+@@ -130,3 +130,3 @@ class MainActivity : Activity() {
+         space()
+-        text("Без регистрация. Не се пазят име, телефон или история на движението. Гласът и позицията се трият с тревогата (до 30 мин). При непосредствена опасност звънни на 112 — приложението не е спешна служба и не гарантира, че някой ще дойде.", 13f, color = Color.GRAY)
++        text(tr("Без регистрация. Не се пазят име, телефон или история на движението. Гласът и позицията се трият с тревогата (до 30 мин). При непосредствена опасност звънни на 112 — приложението не е спешна служба и не гарантира, че някой ще дойде.", "No sign-up. No name, phone number or movement history is stored. Voice and position are deleted with the alarm (within 30 min). In immediate danger call 112 — this app is not an emergency service and does not guarantee that anyone will come."), 13f, color = Color.GRAY)
+     }
+@@ -176,3 +176,3 @@ class MainActivity : Activity() {
+         if (ok) text("✓ $label", 15f, color = GREEN)
+-        else button("Разреши: $label") { fix() }
++        else button(tr("Разреши: $label", "Allow: $label")) { fix() }
+     }
+diff --git a/android/app/src/main/java/bg/emillion/sos/Overlay.kt b/android/app/src/main/java/bg/emillion/sos/Overlay.kt
+index e65b119..3112b83 100644
+--- a/android/app/src/main/java/bg/emillion/sos/Overlay.kt
++++ b/android/app/src/main/java/bg/emillion/sos/Overlay.kt
+@@ -77,3 +77,3 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
+         val fire = Runnable { if (!dragging) { hideBubble(); v.text = "…"; onHold() } }
+-        val tick1 = Runnable { if (!dragging) showBubble(lp, if (alarmOn) "Спира след 1" else "1") }
++        val tick1 = Runnable { if (!dragging) showBubble(lp, if (alarmOn) tr("Спира след 1", "Stops in 1") else "1") }
+         v.setOnTouchListener { _, e ->
+@@ -82,3 +82,3 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
+                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; dragging = false
+-                    showBubble(lp, if (alarmOn) "Спира след 2" else "2")
++                    showBubble(lp, if (alarmOn) tr("Спира след 2", "Stops in 2") else "2")
+                     v.postDelayed(tick1, 1000); v.postDelayed(fire, 2000)
+@@ -150,3 +150,3 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
+     private fun restoreLabel(v: TextView) {
+-        v.text = if (alarmOn) (if (helpers > 0) "СТОП\n$helpers↗" else "СТОП") else "SOS"
++        v.text = if (alarmOn) (if (helpers > 0) tr("СТОП\n$helpers↗", "STOP\n$helpers↗") else tr("СТОП", "STOP")) else "SOS"
+     }
+diff --git a/android/app/src/main/java/bg/emillion/sos/SosService.kt b/android/app/src/main/java/bg/emillion/sos/SosService.kt
+index 6dd2cbd..de9397a 100644
+--- a/android/app/src/main/java/bg/emillion/sos/SosService.kt
++++ b/android/app/src/main/java/bg/emillion/sos/SosService.kt
+@@ -92,4 +92,4 @@ class SosService : Service(), LocationListener {
+         nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+-        nm.createNotificationChannel(NotificationChannel(CH_RUN, "На линия", NotificationManager.IMPORTANCE_LOW))
+-        nm.createNotificationChannel(NotificationChannel(CH_ALERT, "Някой наоколо има нужда от помощ", NotificationManager.IMPORTANCE_HIGH).apply {
++        nm.createNotificationChannel(NotificationChannel(CH_RUN, tr("На линия", "Online"), NotificationManager.IMPORTANCE_LOW))
++        nm.createNotificationChannel(NotificationChannel(CH_ALERT, tr("Някой наоколо има нужда от помощ", "Someone nearby needs help"), NotificationManager.IMPORTANCE_HIGH).apply {
+             setSound(null, null) // звукът е наш и е тих
+@@ -98,3 +98,3 @@ class SosService : Service(), LocationListener {
+         try {
+-            goForeground("Свързване…")
++            goForeground(tr("Свързване…", "Connecting…"))
+         } catch (e: Exception) {
+@@ -120,3 +120,3 @@ class SosService : Service(), LocationListener {
+     override fun onStartCommand(i: Intent?, flags: Int, id: Int): Int {
+-        try { goForeground(if (online) "На линия · Помощ ${Prefs.n(this)}" else "Свързване…") } catch (_: Exception) {}
++        try { goForeground(if (online) tr("На линия · Помощ ${Prefs.n(this)}", "Online · Help ${Prefs.n(this)}") else tr("Свързване…", "Connecting…")) } catch (_: Exception) {}
+         if (::overlay.isInitialized) overlay.showButton() // ако разрешението е дадено след старта
+@@ -194,3 +194,3 @@ class SosService : Service(), LocationListener {
+                 online = true; backoff = 2000L
+-                status("На линия · Помощ ${Prefs.n(this@SosService)}")
++                status(tr("На линия · Помощ ${Prefs.n(this@SosService)}", "Online · Help ${Prefs.n(this@SosService)}"))
+                 sendPrefs()
+@@ -216,3 +216,3 @@ class SosService : Service(), LocationListener {
+         registering = true
+-        status("Свързване…")
++        status(tr("Свързване…", "Connecting…"))
+         Thread {
+@@ -225,3 +225,3 @@ class SosService : Service(), LocationListener {
+                     registering = false
+-                    if (e.code == 403) out(e.message ?: "Устройството е спряно") else lost()
++                    if (e.code == 403) out(e.message ?: tr("Устройството е спряно", "This device is blocked")) else lost()
+                 }
+@@ -236,3 +236,3 @@ class SosService : Service(), LocationListener {
+         if (stopped || kicked) return
+-        status("Няма връзка — опитвам отново…")
++        status(tr("Няма връзка — опитвам отново…", "No connection — retrying…"))
+         main.postDelayed({ if (!stopped && !kicked && !online) connect() }, backoff)
+@@ -278,3 +278,3 @@ class SosService : Service(), LocationListener {
+                 pendingAudio?.let { pendingAudio = null; sendAudio(it) }
+-                if (recorder == null && pendingAudio == null && mineVoice != "🎙 Изпраща гласа…") after112() // без глас — 112 веднага
++                if (recorder == null && pendingAudio == null && mineVoice != tr("🎙 Изпраща гласа…", "🎙 Sending voice…")) after112() // без глас — 112 веднага
+                 refresh()
+@@ -282,7 +282,7 @@ class SosService : Service(), LocationListener {
+             "exactSet" -> { mineExact = m.optBoolean("on"); refresh() }
+-            "audioSaved" -> { mineVoice = "🎙 Гласът е изпратен"; after112(); refresh() }
++            "audioSaved" -> { mineVoice = tr("🎙 Гласът е изпратен", "🎙 Voice sent"); after112(); refresh() }
+             "ack" -> {
+                 mineHelpers = m.optInt("count")
+-                val km = if (m.isNull("km")) "" else " · ${m.optDouble("km")} км"
+-                mineLastHelper = "Помощ ${m.optInt("n")}$km"
++                val km = if (m.isNull("km")) "" else tr(" · ${m.optDouble("km")} км", " · ${m.optDouble("km")} km")
++                mineLastHelper = tr("Помощ ${m.optInt("n")}$km", "Help ${m.optInt("n")}$km")
+                 overlay.setAlarm(true, mineHelpers)
+@@ -295,5 +295,5 @@ class SosService : Service(), LocationListener {
+                 val t = SimpleDateFormat("HH:mm", Locale("bg")).format(Date(m.optLong("until")))
+-                toast("Тревогите от този телефон са спрени до $t — няколко души ги отбелязаха като фалшиви.")
++                toast(tr("Тревогите от този телефон са спрени до $t — няколко души ги отбелязаха като фалшиви.", "Alarms from this phone are paused until $t — several people marked them as false."))
+             }
+-            "falseNoted" -> toast("Отбелязано като фалшива тревога")
++            "falseNoted" -> toast(tr("Отбелязано като фалшива тревога", "Marked as a false alarm"))
+             "error" -> {
+@@ -302,3 +302,3 @@ class SosService : Service(), LocationListener {
+             }
+-            "kicked" -> out(m.optString("why", "Излязъл си"))
++            "kicked" -> out(m.optString("why", tr("Излязъл си", "You are signed out")))
+         }
+@@ -324,3 +324,3 @@ class SosService : Service(), LocationListener {
+         if (!online || l == null) {
+-            toast(if (!online) "Няма връзка! Звънни на 112." else "Още няма GPS позиция. Звънни на 112.")
++            toast(if (!online) tr("Няма връзка! Звънни на 112.", "No connection! Call 112.") else tr("Още няма GPS позиция. Звънни на 112.", "No GPS position yet. Call 112."))
+             dial112()
+@@ -333,3 +333,3 @@ class SosService : Service(), LocationListener {
+         vibrateOnce()
+-        if (hasMic()) startRecording() else mineVoice = "🎙 Няма разрешение за микрофон"
++        if (hasMic()) startRecording() else mineVoice = tr("🎙 Няма разрешение за микрофон", "🎙 No microphone permission")
+         refresh()
+@@ -380,3 +380,3 @@ class SosService : Service(), LocationListener {
+             recorder = null
+-            mineVoice = "🎙 Записът не тръгна"
++            mineVoice = tr("🎙 Записът не тръгна", "🎙 Recording failed to start")
+         }
+@@ -400,6 +400,6 @@ class SosService : Service(), LocationListener {
+         val f = File(cacheDir, "out.m4a")
+-        if (!ok || !f.exists() || f.length() == 0L) { mineVoice = "🎙 Записът е празен"; after112(); refresh(); return }
++        if (!ok || !f.exists() || f.length() == 0L) { mineVoice = tr("🎙 Записът е празен", "🎙 The recording is empty"); after112(); refresh(); return }
+         val bytes = f.readBytes()
+         f.delete()
+-        mineVoice = "🎙 Изпраща гласа…"
++        mineVoice = tr("🎙 Изпраща гласа…", "🎙 Sending voice…")
+         if (mine) sendAudio(bytes) else pendingAudio = bytes
+@@ -410,3 +410,3 @@ class SosService : Service(), LocationListener {
+         val ok = send(JSONObject().put("t", "audio").put("mime", "audio/mp4").put("b64", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+-        if (!ok) { mineVoice = "🎙 Гласът не тръгна — няма връзка"; after112() }
++        if (!ok) { mineVoice = tr("🎙 Гласът не тръгна — няма връзка", "🎙 Voice not sent — no connection"); after112() }
+     }
+@@ -420,3 +420,3 @@ class SosService : Service(), LocationListener {
+                 val f = File(cacheDir, "in_$id.m4a")
+-                if (f.exists()) play(f) else { playWhenArrives = id; send(JSONObject().put("t", "getaudio").put("id", id)); toast("Зарежда гласа…") }
++                if (f.exists()) play(f) else { playWhenArrives = id; send(JSONObject().put("t", "getaudio").put("id", id)); toast(tr("Зарежда гласа…", "Loading voice…")) }
+             }
+@@ -449,3 +449,3 @@ class SosService : Service(), LocationListener {
+             }
+-        } catch (_: Exception) { toast("Гласът не може да се пусне") }
++        } catch (_: Exception) { toast(tr("Гласът не може да се пусне", "Voice cannot be played")) }
+     }
+@@ -475,4 +475,4 @@ class SosService : Service(), LocationListener {
+         val first = mutableListOf<Btn>()
+-        if (a.optBoolean("audio")) first.add(Btn("▶ Чуй", Overlay.BLUE) { onAlertAction(id, "listen") })
+-        first.add(Btn("📍 Карта", Overlay.GLASS) { onAlertAction(id, "map") })
++        if (a.optBoolean("audio")) first.add(Btn(tr("▶ Чуй", "▶ Listen"), Overlay.BLUE) { onAlertAction(id, "listen") })
++        first.add(Btn(tr("📍 Карта", "📍 Map"), Overlay.GLASS) { onAlertAction(id, "map") })
+         rows.add(first)
+@@ -483,6 +483,6 @@ class SosService : Service(), LocationListener {
+         rows.add(listOf(
+-            Btn("⚠ Фалшива", Overlay.DARK) { onAlertAction(id, "false") },
+-            Btn("✕ Скрий", Overlay.GLASS) { onAlertAction(id, "dismiss") },
++            Btn(tr("⚠ Фалшива", "⚠ False"), Overlay.DARK) { onAlertAction(id, "false") },
++            Btn(tr("✕ Скрий", "✕ Hide"), Overlay.GLASS) { onAlertAction(id, "dismiss") },
+         ))
+-        overlay.showCard("SOS · Помощ ${a.optInt("n")}$more", info(a), rows)
++        overlay.showCard(tr("SOS · Помощ ${a.optInt("n")}$more", "SOS · Help ${a.optInt("n")}$more"), info(a), rows)
+     }
+@@ -491,9 +491,9 @@ class SosService : Service(), LocationListener {
+         notifyMine()
+-        val head = if (mine) "🔴 Тревога · стигна до $mineReached" else "🔴 Изпраща тревогата…"
++        val head = if (mine) tr("🔴 Тревога · стигна до $mineReached", "🔴 Alarm · reached $mineReached") else tr("🔴 Изпраща тревогата…", "🔴 Sending the alarm…")
+         val voice = recorder?.let {
+             val s = ((System.currentTimeMillis() - recStart) / 1000).coerceAtMost(20)
+-            "🎙 Записва… $s / 20 сек — говори"
++            tr("🎙 Записва… $s / 20 сек — говори", "🎙 Recording… $s / 20 sec — speak")
+         } ?: mineVoice
+-        val where = if (mineExact) "📍 Виждат: точното място" else "📍 Виждат: само района (~300 м)"
+-        val help = if (mineHelpers > 0) "🙋 Идват: $mineHelpers · последно $mineLastHelper" else "🙋 Още никой не е тръгнал"
++        val where = if (mineExact) tr("📍 Виждат: точното място", "📍 They see: exact location") else tr("📍 Виждат: само района (~300 м)", "📍 They see: area only (~300 m)")
++        val help = if (mineHelpers > 0) tr("🙋 Идват: $mineHelpers · последно $mineLastHelper", "🙋 Coming: $mineHelpers · latest $mineLastHelper") else tr("🙋 Още никой не е тръгнал", "🙋 Nobody is on the way yet")
+         val info = listOf(voice, where, help).filter { it.isNotBlank() }.joinToString("\n")
+@@ -501,6 +501,6 @@ class SosService : Service(), LocationListener {
+         val r1 = mutableListOf<Btn>()
+-        if (recorder != null) r1.add(Btn("⏹ Прати гласа", Overlay.BLUE) { stopRecording(send = true) })
+-        else if (hasMic()) r1.add(Btn("🎙 Нов запис", Overlay.GLASS) { if (mine || minePending) startRecording(); refresh() })
+-        else r1.add(Btn("🎙 Разреши микрофон", Overlay.BLUE) { openAppForMic() })
+-        r1.add(Btn(if (mineExact) "📍 Само района" else "📍 Покажи точно", Overlay.GLASS) {
++        if (recorder != null) r1.add(Btn(tr("⏹ Прати гласа", "⏹ Send voice"), Overlay.BLUE) { stopRecording(send = true) })
++        else if (hasMic()) r1.add(Btn(tr("🎙 Нов запис", "🎙 New recording"), Overlay.GLASS) { if (mine || minePending) startRecording(); refresh() })
++        else r1.add(Btn(tr("🎙 Разреши микрофон", "🎙 Allow microphone"), Overlay.BLUE) { openAppForMic() })
++        r1.add(Btn(if (mineExact) tr("📍 Само района", "📍 Area only") else tr("📍 Покажи точно", "📍 Show exact"), Overlay.GLASS) {
+             send(JSONObject().put("t", "exact").put("on", !mineExact))
+@@ -510,3 +510,3 @@ class SosService : Service(), LocationListener {
+             Btn("📞 112", Overlay.GREEN) { dial112() },
+-            Btn("✕ Спри тревогата", Overlay.DARK) { send(JSONObject().put("t", "cancel")); clearMine() },
++            Btn(tr("✕ Спри тревогата", "✕ Stop the alarm"), Overlay.DARK) { send(JSONObject().put("t", "cancel")); clearMine() },
+         ))
+@@ -529,7 +529,7 @@ class SosService : Service(), LocationListener {
+         val street = addr[id]?.first?.takeIf { it.isNotBlank() }
+-        val where = if (exact) (street ?: "точно място") else "район ~300 м" + (street?.let { " около $it" } ?: "")
++        val where = if (exact) (street ?: tr("точно място", "exact location")) else tr("район ~300 м", "area ~300 m") + (street?.let { tr(" около $it", " near $it") } ?: "")
+         val helpers = a.optInt("helpers")
+-        val h = if (helpers > 0) " · идват $helpers" else ""
+-        val voice = if (a.optBoolean("audio")) "🎙 има гласово съобщение\n" else ""
+-        return "$voice$where\n$km км · преди $mins мин$h"
++        val h = if (helpers > 0) tr(" · идват $helpers", " · $helpers coming") else ""
++        val voice = if (a.optBoolean("audio")) tr("🎙 има гласово съобщение\n", "🎙 has a voice message\n") else ""
++        return "$voice$where\n" + tr("$km км · преди $mins мин$h", "$km km · $mins min ago$h")
+     }
+@@ -575,3 +575,3 @@ class SosService : Service(), LocationListener {
+             .setSmallIcon(android.R.drawable.ic_dialog_alert)
+-            .setContentTitle("SOS · Помощ ${a.optInt("n")} има нужда от помощ")
++            .setContentTitle(tr("SOS · Помощ ${a.optInt("n")} има нужда от помощ", "SOS · Help ${a.optInt("n")} needs help"))
+             .setStyle(Notification.BigTextStyle().bigText(text))
+@@ -600,3 +600,3 @@ class SosService : Service(), LocationListener {
+     private fun openAppForMic() {
+-        toast("Разреши „Микрофон“ — приложението ще се рестартира само")
++        toast(tr("Разреши „Микрофон“ — приложението ще се рестартира само", "Allow “Microphone” — the app will restart by itself"))
+         try { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+@@ -607,4 +607,4 @@ class SosService : Service(), LocationListener {
+         if (!mine && !minePending) { nm.cancel(NOTIF_MINE); return }
+-        val head = if (mine) "Тревогата е пусната · стигна до $mineReached" else "Изпраща тревогата…"
+-        val sub = if (mineHelpers > 0) "Идват: $mineHelpers · последно $mineLastHelper" else "Още никой не е тръгнал"
++        val head = if (mine) tr("Тревогата е пусната · стигна до $mineReached", "Alarm sent · reached $mineReached") else tr("Изпраща тревогата…", "Sending the alarm…")
++        val sub = if (mineHelpers > 0) tr("Идват: $mineHelpers · последно $mineLastHelper", "Coming: $mineHelpers · latest $mineLastHelper") else tr("Още никой не е тръгнал", "Nobody is on the way yet")
+         nm.notify(NOTIF_MINE, Notification.Builder(this, CH_RUN)
+diff --git a/index.html b/index.html
+index f6c9618..57d894f 100644
+--- a/index.html
++++ b/index.html
+@@ -5,3 +5,3 @@
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+-<title>SOS — помощ наоколо</title>
++<title>SOS — помощ наоколо · help nearby</title>
+ <meta http-equiv="refresh" content="0; url=https://sos.mihov-emil.workers.dev/">
+@@ -21,2 +21,3 @@ a.btn{display:block;text-align:center;text-decoration:none;padding:12px;border-r
+ <a class="btn" href="https://sos.mihov-emil.workers.dev/SOS.apk">Свали приложението (Android)</a>
++<p lang="en">SOS — help nearby. Redirecting… <a href="https://sos.mihov-emil.workers.dev/?lang=en">English page</a> · <a href="https://sos.mihov-emil.workers.dev/SOS.apk?lang=en">Download the app (Android)</a></p>
+ </body>
+diff --git a/worker/src/worker.js b/worker/src/worker.js
+index 315d9d3..f00f92e 100644
+--- a/worker/src/worker.js
++++ b/worker/src/worker.js
+@@ -23,4 +23,4 @@ export default {
+     if (url.pathname === '/health') return json({ ok: true, v: 3 });
+-    if (url.pathname === '/' && req.method === 'GET') return html(HOME_HTML);
+-    if (url.pathname === '/SOS.apk') return apk();
++    if (url.pathname === '/' && req.method === 'GET') return html(home(pageLang(req, url)));
++    if (url.pathname === '/SOS.apk') return apk(pageLang(req, url));
+     return env.HUB.get(env.HUB.idFromName('sofia')).fetch(req);
+@@ -69,3 +69,4 @@ export class Hub {
+     const device = String((body && body.device) || '').toLowerCase();
+-    if (!/^[0-9a-f]{8,32}$/.test(device)) return json({ error: 'невалидно устройство' }, 400);
++    const lang = lng(body && body.lang);
++    if (!/^[0-9a-f]{8,32}$/.test(device)) return json({ error: T(lang, 'невалидно устройство', 'invalid device') }, 400);
+     const now = Date.now();
+@@ -76,3 +77,3 @@ export class Hub {
+       const cnt = ((await this.db.get(rk)) || 0) + 1;
+-      if (cnt > NEW_DEVICES_PER_IP_HOUR) return json({ error: 'Твърде много нови устройства от тази мрежа. Опитай след час.' }, 429);
++      if (cnt > NEW_DEVICES_PER_IP_HOUR) return json({ error: T(lang, 'Твърде много нови устройства от тази мрежа. Опитай след час.', 'Too many new devices from this network. Try again in an hour.') }, 429);
+       await this.db.put(rk, cnt);
+@@ -83,4 +84,4 @@ export class Hub {
+     }
+-    if (d.blocked) return json({ error: 'Това устройство е спряно от администратора.' }, 403);
+-    if (d.sess) await this.kick(d.sess, 'Приложението е стартирано наново');
++    if (d.blocked) return json({ error: T(lang, 'Това устройство е спряно от администратора.', 'This device has been blocked by the administrator.') }, 403);
++    if (d.sess) await this.kick(d.sess, ['Приложението е стартирано наново', 'The app was started again']);
+     const token = hex(crypto.getRandomValues(new Uint8Array(32)));
+@@ -93,2 +94,3 @@ export class Hub {
+ 
++  // why = [на български, на английски]; всеки получава на езика на приложението си
+   async kick(token, why) {
+@@ -96,4 +98,5 @@ export class Hub {
+     for (const w of this.state.getWebSockets()) {
+-      if ((w.deserializeAttachment() || {}).sess === token) {
+-        try { w.send(JSON.stringify({ t: 'kicked', why })); w.close(4001, 'kicked'); } catch {}
++      const at = w.deserializeAttachment() || {};
++      if (at.sess === token) {
++        try { w.send(JSON.stringify({ t: 'kicked', why: T(at.lang, why[0], why[1]) })); w.close(4001, 'kicked'); } catch {}
+       }
+@@ -124,3 +127,3 @@ export class Hub {
+     if (d.blocked) {
+-      if (d.sess) await this.kick(d.sess, 'Устройството е спряно от администратора');
++      if (d.sess) await this.kick(d.sess, ['Устройството е спряно от администратора', 'This device has been blocked by the administrator']);
+       const al = await this.db.get('alarm:' + device);
+@@ -143,3 +146,3 @@ export class Hub {
+     this.state.acceptWebSocket(ws);
+-    ws.serializeAttachment({ sess: token, dev: device, n: d.n, lat: null, lon: null, ts: 0, known: [], receive: true });
++    ws.serializeAttachment({ sess: token, dev: device, n: d.n, lat: null, lon: null, ts: 0, known: [], receive: true, lang: lng(url.searchParams.get('lang')) });
+     ws.send(JSON.stringify({ t: 'hello', n: d.n }));
+@@ -182,5 +185,5 @@ export class Hub {
+     if (m.t === 'sos') {
+-      if (!valid(m.lat, m.lon)) return send(ws, { t: 'error', msg: 'Няма GPS позиция — изчакай секунда' });
++      if (!valid(m.lat, m.lon)) return send(ws, { t: 'error', msg: T(a.lang, 'Няма GPS позиция — изчакай секунда', 'No GPS position — wait a second') });
+       const d = await this.db.get('dev:' + a.dev);
+-      if (!d || d.blocked) return send(ws, { t: 'error', msg: 'Устройството е спряно' });
++      if (!d || d.blocked) return send(ws, { t: 'error', msg: T(a.lang, 'Устройството е спряно', 'This device is blocked') });
+       if (d.mutedUntil > now) return send(ws, { t: 'muted', until: d.mutedUntil });
+@@ -189,3 +192,6 @@ export class Hub {
+       if (!existing && now - last < SOS_COOLDOWN_MS)
+-        return send(ws, { t: 'error', msg: 'Нова тревога може след ' + Math.ceil((SOS_COOLDOWN_MS - (now - last)) / 60000) + ' мин' });
++      {
++        const mins = Math.ceil((SOS_COOLDOWN_MS - (now - last)) / 60000);
++        return send(ws, { t: 'error', msg: T(a.lang, 'Нова тревога може след ' + mins + ' мин', 'A new alarm is possible in ' + mins + ' min') });
++      }
+       a.lat = +m.lat; a.lon = +m.lon; a.ts = now;
+@@ -218,6 +224,6 @@ export class Hub {
+       const al = await this.db.get('alarm:' + a.dev);
+-      if (!al) return send(ws, { t: 'error', msg: 'Няма активна тревога за гласа' });
++      if (!al) return send(ws, { t: 'error', msg: T(a.lang, 'Няма активна тревога за гласа', 'No active alarm for the voice message') });
+       const b64 = String(m.b64 || '');
+       if (!b64 || b64.length > AUDIO_MAX_B64 || !/^[A-Za-z0-9+/=]+$/.test(b64))
+-        return send(ws, { t: 'error', msg: 'Гласовото съобщение е твърде дълго' });
++        return send(ws, { t: 'error', msg: T(a.lang, 'Гласовото съобщение е твърде дълго', 'The voice message is too long') });
+       await this.dropAudio(al.id);
+@@ -234,3 +240,3 @@ export class Hub {
+       const meta = await this.db.get('audio:' + m.id);
+-      if (!meta || !a.known.includes(m.id)) return send(ws, { t: 'error', msg: 'Гласовото съобщение вече не е налично' });
++      if (!meta || !a.known.includes(m.id)) return send(ws, { t: 'error', msg: T(a.lang, 'Гласовото съобщение вече не е налично', 'The voice message is no longer available') });
+       let b64 = '';
+@@ -348,3 +354,3 @@ export class Hub {
+ // github.com се отваря в приложението GitHub, което иска вход, преди да свали.
+-async function apk() {
++async function apk(lang) {
+   try {
+@@ -359,3 +365,3 @@ async function apk() {
+   } catch (e) {
+-    return html('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">Приложението не може да се свали в момента. Опитай след минута.</p>', 502);
++    return html('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">' + T(lang, 'Приложението не може да се свали в момента. Опитай след минута.', 'The app cannot be downloaded right now. Try again in a minute.') + '</p>', 502);
+   }
+@@ -375,2 +381,14 @@ function pubKey(al) { const p = pub(al); return p.lat + ',' + p.lon + ',' + !!al
+ 
++// ---------- език ----------
++// Приложението праща lang ('bg' или 'en') при /register и в адреса на /ws. Без него — български.
++function lng(x) { return x === 'en' ? 'en' : 'bg'; }
++function T(lang, bg, en) { return lang === 'en' ? en : bg; }
++// Страницата: ?lang= печели, иначе езикът на браузъра; не-български браузър получава английски.
++function pageLang(req, url) {
++  const q = url.searchParams.get('lang');
++  if (q === 'bg' || q === 'en') return q;
++  const al = (req.headers.get('accept-language') || '').toLowerCase();
++  return !al || al.startsWith('bg') ? 'bg' : 'en';
++}
++
+ // ---------- помощни ----------
+@@ -414,8 +432,28 @@ h2{font-size:17px;margin:20px 0 6px}
+ 
+-const HOME_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
++const HOME = {
++  bg: {
++    h1: 'SOS — помощ наоколо',
++    p: 'Паник бутон за всеки, без регистрация. Тревогата стига веднага до хората наоколо с приложението, в радиус 7 км. Можеш да оставиш гласово съобщение и да избереш дали да покажеш точното място или само района.',
++    dl: 'Свали приложението (Android)',
++    note: 'При непосредствена опасност звънни на 112. Приложението не е спешна служба и не гарантира, че някой ще дойде.',
++    other: '<a href="/?lang=en">English</a>',
++  },
++  en: {
++    h1: 'SOS — help nearby',
++    p: 'A panic button for everyone, no sign-up. The alarm reaches people nearby who have the app, within 7 km, right away. You can leave a voice message and choose whether to show your exact location or only the area.',
++    dl: 'Download the app (Android)',
++    note: 'In immediate danger call 112. This app is not an emergency service and does not guarantee that anyone will come.',
++    other: '<a href="/?lang=bg">Български</a>',
++  },
++};
++function home(lang) {
++  const h = HOME[lang];
++  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS</title>${STYLE}</head><body>
+-<h1>SOS — помощ наоколо</h1>
+-<p>Паник бутон за всеки, без регистрация. Тревогата стига веднага до хората наоколо с приложението, в радиус 7 км. Можеш да оставиш гласово съобщение и да избереш дали да покажеш точното място или само района.</p>
+-<a class="btn" href="/SOS.apk">Свали приложението (Android)</a>
+-<p class="mut">При непосредствена опасност звънни на 112. Приложението не е спешна служба и не гарантира, че някой ще дойде.</p>
++<p class="mut" style="text-align:right;margin:0">${h.other}</p>
++<h1>${h.h1}</h1>
++<p>${h.p}</p>
++<a class="btn" href="/SOS.apk?lang=${lang}">${h.dl}</a>
++<p class="mut">${h.note}</p>
+ </body></html>`;
++}
