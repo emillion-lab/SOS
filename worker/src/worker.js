@@ -21,8 +21,8 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (url.pathname === '/health') return json({ ok: true, v: 3 });
-    if (url.pathname === '/' && req.method === 'GET') return html(HOME_HTML);
-    if (url.pathname === '/SOS.apk') return apk();
+    if (url.pathname === '/' && req.method === 'GET') return html(home(pageLang(req, url)));
+    if (url.pathname === '/SOS.apk') return apk(pageLang(req, url));
     return env.HUB.get(env.HUB.idFromName('sofia')).fetch(req);
   },
 };
@@ -67,22 +67,23 @@ export class Hub {
   // ---------- устройство ----------
   async register(body, req) {
     const device = String((body && body.device) || '').toLowerCase();
-    if (!/^[0-9a-f]{8,32}$/.test(device)) return json({ error: 'невалидно устройство' }, 400);
+    const lang = lng(body && body.lang);
+    if (!/^[0-9a-f]{8,32}$/.test(device)) return json({ error: T(lang, 'невалидно устройство', 'invalid device') }, 400);
     const now = Date.now();
     let d = await this.db.get('dev:' + device);
     if (!d) {
       const ip = req.headers.get('cf-connecting-ip') || 'x';
       const rk = 'reg:' + ip + ':' + Math.floor(now / 3600e3);
       const cnt = ((await this.db.get(rk)) || 0) + 1;
-      if (cnt > NEW_DEVICES_PER_IP_HOUR) return json({ error: 'Твърде много нови устройства от тази мрежа. Опитай след час.' }, 429);
+      if (cnt > NEW_DEVICES_PER_IP_HOUR) return json({ error: T(lang, 'Твърде много нови устройства от тази мрежа. Опитай след час.', 'Too many new devices from this network. Try again in an hour.') }, 429);
       await this.db.put(rk, cnt);
       const n = ((await this.db.get('seq')) || 0) + 1;
       await this.db.put('seq', n);
       await this.db.put('num:' + n, device);
       d = { n, created: now, blocked: false, mutedUntil: 0, sess: null, alarms: 0, last: now };
     }
-    if (d.blocked) return json({ error: 'Това устройство е спряно от администратора.' }, 403);
-    if (d.sess) await this.kick(d.sess, 'Приложението е стартирано наново');
+    if (d.blocked) return json({ error: T(lang, 'Това устройство е спряно от администратора.', 'This device has been blocked by the administrator.') }, 403);
+    if (d.sess) await this.kick(d.sess, ['Приложението е стартирано наново', 'The app was started again']);
     const token = hex(crypto.getRandomValues(new Uint8Array(32)));
     d.sess = token;
     d.last = now;
@@ -91,11 +92,13 @@ export class Hub {
     return json({ token, n: d.n });
   }
 
+  // why = [на български, на английски]; всеки получава на езика на приложението си
   async kick(token, why) {
     await this.db.delete('sess:' + token);
     for (const w of this.state.getWebSockets()) {
-      if ((w.deserializeAttachment() || {}).sess === token) {
-        try { w.send(JSON.stringify({ t: 'kicked', why })); w.close(4001, 'kicked'); } catch {}
+      const at = w.deserializeAttachment() || {};
+      if (at.sess === token) {
+        try { w.send(JSON.stringify({ t: 'kicked', why: T(at.lang, why[0], why[1]) })); w.close(4001, 'kicked'); } catch {}
       }
     }
   }
@@ -122,7 +125,7 @@ export class Hub {
     if (!d.blocked) d.mutedUntil = 0;
     await this.db.put('dev:' + device, d);
     if (d.blocked) {
-      if (d.sess) await this.kick(d.sess, 'Устройството е спряно от администратора');
+      if (d.sess) await this.kick(d.sess, ['Устройството е спряно от администратора', 'This device has been blocked by the administrator']);
       const al = await this.db.get('alarm:' + device);
       if (al) await this.endAlarm(al, 'blocked');
     }
@@ -141,7 +144,7 @@ export class Hub {
     const pair = new WebSocketPair();
     const ws = pair[1];
     this.state.acceptWebSocket(ws);
-    ws.serializeAttachment({ sess: token, dev: device, n: d.n, lat: null, lon: null, ts: 0, known: [], receive: true });
+    ws.serializeAttachment({ sess: token, dev: device, n: d.n, lat: null, lon: null, ts: 0, known: [], receive: true, lang: lng(url.searchParams.get('lang')) });
     ws.send(JSON.stringify({ t: 'hello', n: d.n }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
@@ -180,14 +183,17 @@ export class Hub {
     }
 
     if (m.t === 'sos') {
-      if (!valid(m.lat, m.lon)) return send(ws, { t: 'error', msg: 'Няма GPS позиция — изчакай секунда' });
+      if (!valid(m.lat, m.lon)) return send(ws, { t: 'error', msg: T(a.lang, 'Няма GPS позиция — изчакай секунда', 'No GPS position — wait a second') });
       const d = await this.db.get('dev:' + a.dev);
-      if (!d || d.blocked) return send(ws, { t: 'error', msg: 'Устройството е спряно' });
+      if (!d || d.blocked) return send(ws, { t: 'error', msg: T(a.lang, 'Устройството е спряно', 'This device is blocked') });
       if (d.mutedUntil > now) return send(ws, { t: 'muted', until: d.mutedUntil });
       const existing = await this.db.get('alarm:' + a.dev);
       const last = (await this.db.get('cool:' + a.dev)) || 0;
       if (!existing && now - last < SOS_COOLDOWN_MS)
-        return send(ws, { t: 'error', msg: 'Нова тревога може след ' + Math.ceil((SOS_COOLDOWN_MS - (now - last)) / 60000) + ' мин' });
+      {
+        const mins = Math.ceil((SOS_COOLDOWN_MS - (now - last)) / 60000);
+        return send(ws, { t: 'error', msg: T(a.lang, 'Нова тревога може след ' + mins + ' мин', 'A new alarm is possible in ' + mins + ' min') });
+      }
       a.lat = +m.lat; a.lon = +m.lon; a.ts = now;
       ws.serializeAttachment(a);
       const al = existing || {
@@ -216,10 +222,10 @@ export class Hub {
 
     if (m.t === 'audio') {
       const al = await this.db.get('alarm:' + a.dev);
-      if (!al) return send(ws, { t: 'error', msg: 'Няма активна тревога за гласа' });
+      if (!al) return send(ws, { t: 'error', msg: T(a.lang, 'Няма активна тревога за гласа', 'No active alarm for the voice message') });
       const b64 = String(m.b64 || '');
       if (!b64 || b64.length > AUDIO_MAX_B64 || !/^[A-Za-z0-9+/=]+$/.test(b64))
-        return send(ws, { t: 'error', msg: 'Гласовото съобщение е твърде дълго' });
+        return send(ws, { t: 'error', msg: T(a.lang, 'Гласовото съобщение е твърде дълго', 'The voice message is too long') });
       await this.dropAudio(al.id);
       const parts = Math.ceil(b64.length / AUDIO_CHUNK);
       for (let i = 0; i < parts; i++) await this.db.put('audio:' + al.id + ':' + i, b64.slice(i * AUDIO_CHUNK, (i + 1) * AUDIO_CHUNK));
@@ -232,7 +238,7 @@ export class Hub {
 
     if (m.t === 'getaudio' && m.id) {
       const meta = await this.db.get('audio:' + m.id);
-      if (!meta || !a.known.includes(m.id)) return send(ws, { t: 'error', msg: 'Гласовото съобщение вече не е налично' });
+      if (!meta || !a.known.includes(m.id)) return send(ws, { t: 'error', msg: T(a.lang, 'Гласовото съобщение вече не е налично', 'The voice message is no longer available') });
       let b64 = '';
       for (let i = 0; i < meta.parts; i++) b64 += (await this.db.get('audio:' + m.id + ':' + i)) || '';
       return send(ws, { t: 'audio', id: m.id, b64, mime: meta.mime });
@@ -346,7 +352,7 @@ export class Hub {
 // ---------- сваляне на APK ----------
 // Сървърът взима файла от GitHub и го подава директно. Иначе на телефона линкът към
 // github.com се отваря в приложението GitHub, което иска вход, преди да свали.
-async function apk() {
+async function apk(lang) {
   try {
     const r = await fetch(APK_URL, { redirect: 'follow', cf: { cacheTtl: 300, cacheEverything: true } });
     if (!r.ok) throw new Error('GitHub ' + r.status);
@@ -357,7 +363,7 @@ async function apk() {
       ...(r.headers.get('content-length') ? { 'content-length': r.headers.get('content-length') } : {}),
     } });
   } catch (e) {
-    return html('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">Приложението не може да се свали в момента. Опитай след минута.</p>', 502);
+    return html('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">' + T(lang, 'Приложението не може да се свали в момента. Опитай след минута.', 'The app cannot be downloaded right now. Try again in a minute.') + '</p>', 502);
   }
 }
 
@@ -372,6 +378,18 @@ function pub(al) {
   return { lat: Math.round(latC * 1e5) / 1e5, lon: Math.round(lonC * 1e5) / 1e5 };
 }
 function pubKey(al) { const p = pub(al); return p.lat + ',' + p.lon + ',' + !!al.exact; }
+
+// ---------- език ----------
+// Приложението праща lang ('bg' или 'en') при /register и в адреса на /ws. Без него — български.
+function lng(x) { return x === 'en' ? 'en' : 'bg'; }
+function T(lang, bg, en) { return lang === 'en' ? en : bg; }
+// Страницата: ?lang= печели, иначе езикът на браузъра; не-български браузър получава английски.
+function pageLang(req, url) {
+  const q = url.searchParams.get('lang');
+  if (q === 'bg' || q === 'en') return q;
+  const al = (req.headers.get('accept-language') || '').toLowerCase();
+  return !al || al.startsWith('bg') ? 'bg' : 'en';
+}
 
 // ---------- помощни ----------
 function valid(lat, lon) { return lat !== null && lon !== null && Number.isFinite(+lat) && Number.isFinite(+lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180; }
@@ -412,10 +430,30 @@ button.mini{display:inline-block;width:auto;padding:6px 10px;margin:0 0 0 8px;fo
 h2{font-size:17px;margin:20px 0 6px}
 </style>`;
 
-const HOME_HTML = `<!doctype html><html lang="bg"><head><meta charset="utf-8">
+const HOME = {
+  bg: {
+    h1: 'SOS — помощ наоколо',
+    p: 'Паник бутон за всеки, без регистрация. Тревогата стига веднага до хората наоколо с приложението, в радиус 7 км. Можеш да оставиш гласово съобщение и да избереш дали да покажеш точното място или само района.',
+    dl: 'Свали приложението (Android)',
+    note: 'При непосредствена опасност звънни на 112. Приложението не е спешна служба и не гарантира, че някой ще дойде.',
+    other: '<a href="/?lang=en">English</a>',
+  },
+  en: {
+    h1: 'SOS — help nearby',
+    p: 'A panic button for everyone, no sign-up. The alarm reaches people nearby who have the app, within 7 km, right away. You can leave a voice message and choose whether to show your exact location or only the area.',
+    dl: 'Download the app (Android)',
+    note: 'In immediate danger call 112. This app is not an emergency service and does not guarantee that anyone will come.',
+    other: '<a href="/?lang=bg">Български</a>',
+  },
+};
+function home(lang) {
+  const h = HOME[lang];
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>SOS</title>${STYLE}</head><body>
-<h1>SOS — помощ наоколо</h1>
-<p>Паник бутон за всеки, без регистрация. Тревогата стига веднага до хората наоколо с приложението, в радиус 7 км. Можеш да оставиш гласово съобщение и да избереш дали да покажеш точното място или само района.</p>
-<a class="btn" href="/SOS.apk">Свали приложението (Android)</a>
-<p class="mut">При непосредствена опасност звънни на 112. Приложението не е спешна служба и не гарантира, че някой ще дойде.</p>
+<p class="mut" style="text-align:right;margin:0">${h.other}</p>
+<h1>${h.h1}</h1>
+<p>${h.p}</p>
+<a class="btn" href="/SOS.apk?lang=${lang}">${h.dl}</a>
+<p class="mut">${h.note}</p>
 </body></html>`;
+}

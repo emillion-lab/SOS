@@ -90,13 +90,13 @@ class SosService : Service(), LocationListener {
         super.onCreate()
         running = true
         nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel(CH_RUN, "На линия", NotificationManager.IMPORTANCE_LOW))
-        nm.createNotificationChannel(NotificationChannel(CH_ALERT, "Някой наоколо има нужда от помощ", NotificationManager.IMPORTANCE_HIGH).apply {
+        nm.createNotificationChannel(NotificationChannel(CH_RUN, tr("На линия", "Online"), NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_ALERT, tr("Някой наоколо има нужда от помощ", "Someone nearby needs help"), NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null) // звукът е наш и е тих
             enableVibration(false)
         })
         try {
-            goForeground("Свързване…")
+            goForeground(tr("Свързване…", "Connecting…"))
         } catch (e: Exception) {
             running = false; stopSelf(); return
         }
@@ -118,7 +118,7 @@ class SosService : Service(), LocationListener {
     }
 
     override fun onStartCommand(i: Intent?, flags: Int, id: Int): Int {
-        try { goForeground(if (online) "На линия · Помощ ${Prefs.n(this)}" else "Свързване…") } catch (_: Exception) {}
+        try { goForeground(if (online) tr("На линия · Помощ ${Prefs.n(this)}", "Online · Help ${Prefs.n(this)}") else tr("Свързване…", "Connecting…")) } catch (_: Exception) {}
         if (::overlay.isInitialized) overlay.showButton() // ако разрешението е дадено след старта
         sendPrefs()
         return START_STICKY
@@ -192,7 +192,7 @@ class SosService : Service(), LocationListener {
         ws = Net.http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(w: WebSocket, r: Response) = main.post {
                 online = true; backoff = 2000L
-                status("На линия · Помощ ${Prefs.n(this@SosService)}")
+                status(tr("На линия · Помощ ${Prefs.n(this@SosService)}", "Online · Help ${Prefs.n(this@SosService)}"))
                 sendPrefs()
                 sendLoc(true)
             }.let { }
@@ -214,7 +214,7 @@ class SosService : Service(), LocationListener {
     private fun register() {
         if (registering || stopped || kicked) return
         registering = true
-        status("Свързване…")
+        status(tr("Свързване…", "Connecting…"))
         Thread {
             try {
                 val j = Net.register(Prefs.device(this))
@@ -223,7 +223,7 @@ class SosService : Service(), LocationListener {
             } catch (e: HttpError) {
                 main.post {
                     registering = false
-                    if (e.code == 403) out(e.message ?: "Устройството е спряно") else lost()
+                    if (e.code == 403) out(e.message ?: tr("Устройството е спряно", "This device is blocked")) else lost()
                 }
             } catch (_: Exception) {
                 main.post { registering = false; lost() }
@@ -234,7 +234,7 @@ class SosService : Service(), LocationListener {
     private fun lost() {
         online = false
         if (stopped || kicked) return
-        status("Няма връзка — опитвам отново…")
+        status(tr("Няма връзка — опитвам отново…", "No connection — retrying…"))
         main.postDelayed({ if (!stopped && !kicked && !online) connect() }, backoff)
         backoff = (backoff * 2).coerceAtMost(60_000L)
     }
@@ -276,15 +276,15 @@ class SosService : Service(), LocationListener {
                 mineExact = m.optBoolean("exact")
                 overlay.setAlarm(true)
                 pendingAudio?.let { pendingAudio = null; sendAudio(it) }
-                if (recorder == null && pendingAudio == null && mineVoice != "🎙 Изпраща гласа…") after112() // без глас — 112 веднага
+                if (recorder == null && pendingAudio == null && mineVoice != tr("🎙 Изпраща гласа…", "🎙 Sending voice…")) after112() // без глас — 112 веднага
                 refresh()
             }
             "exactSet" -> { mineExact = m.optBoolean("on"); refresh() }
-            "audioSaved" -> { mineVoice = "🎙 Гласът е изпратен"; after112(); refresh() }
+            "audioSaved" -> { mineVoice = tr("🎙 Гласът е изпратен", "🎙 Voice sent"); after112(); refresh() }
             "ack" -> {
                 mineHelpers = m.optInt("count")
-                val km = if (m.isNull("km")) "" else " · ${m.optDouble("km")} км"
-                mineLastHelper = "Помощ ${m.optInt("n")}$km"
+                val km = if (m.isNull("km")) "" else tr(" · ${m.optDouble("km")} км", " · ${m.optDouble("km")} km")
+                mineLastHelper = tr("Помощ ${m.optInt("n")}$km", "Help ${m.optInt("n")}$km")
                 overlay.setAlarm(true, mineHelpers)
                 buzz()
                 refresh()
@@ -293,14 +293,14 @@ class SosService : Service(), LocationListener {
             "muted" -> {
                 clearMine()
                 val t = SimpleDateFormat("HH:mm", Locale("bg")).format(Date(m.optLong("until")))
-                toast("Тревогите от този телефон са спрени до $t — няколко души ги отбелязаха като фалшиви.")
+                toast(tr("Тревогите от този телефон са спрени до $t — няколко души ги отбелязаха като фалшиви.", "Alarms from this phone are paused until $t — several people marked them as false."))
             }
-            "falseNoted" -> toast("Отбелязано като фалшива тревога")
+            "falseNoted" -> toast(tr("Отбелязано като фалшива тревога", "Marked as a false alarm"))
             "error" -> {
                 if (minePending) { minePending = false; stopRecording(send = false); nm.cancel(NOTIF_MINE); refresh() }
                 toast(m.optString("msg"))
             }
-            "kicked" -> out(m.optString("why", "Излязъл си"))
+            "kicked" -> out(m.optString("why", tr("Излязъл си", "You are signed out")))
         }
     }
 
@@ -322,7 +322,7 @@ class SosService : Service(), LocationListener {
         if (mine || minePending) { send(JSONObject().put("t", "cancel")); clearMine(); return }
         val l = lastLoc
         if (!online || l == null) {
-            toast(if (!online) "Няма връзка! Звънни на 112." else "Още няма GPS позиция. Звънни на 112.")
+            toast(if (!online) tr("Няма връзка! Звънни на 112.", "No connection! Call 112.") else tr("Още няма GPS позиция. Звънни на 112.", "No GPS position yet. Call 112."))
             dial112()
             return
         }
@@ -331,7 +331,7 @@ class SosService : Service(), LocationListener {
         minePending = true
         send(JSONObject().put("t", "sos").put("lat", l.latitude).put("lon", l.longitude).put("exact", mineExact))
         vibrateOnce()
-        if (hasMic()) startRecording() else mineVoice = "🎙 Няма разрешение за микрофон"
+        if (hasMic()) startRecording() else mineVoice = tr("🎙 Няма разрешение за микрофон", "🎙 No microphone permission")
         refresh()
     }
 
@@ -378,7 +378,7 @@ class SosService : Service(), LocationListener {
             main.post(recTick)
         } catch (e: Exception) {
             recorder = null
-            mineVoice = "🎙 Записът не тръгна"
+            mineVoice = tr("🎙 Записът не тръгна", "🎙 Recording failed to start")
         }
     }
 
@@ -398,17 +398,17 @@ class SosService : Service(), LocationListener {
         try { r.release() } catch (_: Exception) {}
         if (!send) return
         val f = File(cacheDir, "out.m4a")
-        if (!ok || !f.exists() || f.length() == 0L) { mineVoice = "🎙 Записът е празен"; after112(); refresh(); return }
+        if (!ok || !f.exists() || f.length() == 0L) { mineVoice = tr("🎙 Записът е празен", "🎙 The recording is empty"); after112(); refresh(); return }
         val bytes = f.readBytes()
         f.delete()
-        mineVoice = "🎙 Изпраща гласа…"
+        mineVoice = tr("🎙 Изпраща гласа…", "🎙 Sending voice…")
         if (mine) sendAudio(bytes) else pendingAudio = bytes
         refresh()
     }
 
     private fun sendAudio(bytes: ByteArray) {
         val ok = send(JSONObject().put("t", "audio").put("mime", "audio/mp4").put("b64", Base64.encodeToString(bytes, Base64.NO_WRAP)))
-        if (!ok) { mineVoice = "🎙 Гласът не тръгна — няма връзка"; after112() }
+        if (!ok) { mineVoice = tr("🎙 Гласът не тръгна — няма връзка", "🎙 Voice not sent — no connection"); after112() }
     }
 
     // ---------- чужда тревога: действия ----------
@@ -418,7 +418,7 @@ class SosService : Service(), LocationListener {
         when (what) {
             "listen" -> {
                 val f = File(cacheDir, "in_$id.m4a")
-                if (f.exists()) play(f) else { playWhenArrives = id; send(JSONObject().put("t", "getaudio").put("id", id)); toast("Зарежда гласа…") }
+                if (f.exists()) play(f) else { playWhenArrives = id; send(JSONObject().put("t", "getaudio").put("id", id)); toast(tr("Зарежда гласа…", "Loading voice…")) }
             }
             "map" -> open(mapUri(lat, lon))
             "waze", "gmaps" -> {
@@ -447,7 +447,7 @@ class SosService : Service(), LocationListener {
                 prepare()
                 start()
             }
-        } catch (_: Exception) { toast("Гласът не може да се пусне") }
+        } catch (_: Exception) { toast(tr("Гласът не може да се пусне", "Voice cannot be played")) }
     }
 
     private fun mapUri(lat: Double, lon: Double) = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lon")
@@ -473,42 +473,42 @@ class SosService : Service(), LocationListener {
         val more = if (list.size > 1) "  (+${list.size - 1})" else ""
         val rows = mutableListOf<List<Btn>>()
         val first = mutableListOf<Btn>()
-        if (a.optBoolean("audio")) first.add(Btn("▶ Чуй", Overlay.BLUE) { onAlertAction(id, "listen") })
-        first.add(Btn("📍 Карта", Overlay.GLASS) { onAlertAction(id, "map") })
+        if (a.optBoolean("audio")) first.add(Btn(tr("▶ Чуй", "▶ Listen"), Overlay.BLUE) { onAlertAction(id, "listen") })
+        first.add(Btn(tr("📍 Карта", "📍 Map"), Overlay.GLASS) { onAlertAction(id, "map") })
         rows.add(first)
         rows.add(listOf(
             Btn("Waze", Overlay.WAZE) { onAlertAction(id, "waze") },
             Btn("Google Maps", Overlay.GREEN) { onAlertAction(id, "gmaps") },
         ))
         rows.add(listOf(
-            Btn("⚠ Фалшива", Overlay.DARK) { onAlertAction(id, "false") },
-            Btn("✕ Скрий", Overlay.GLASS) { onAlertAction(id, "dismiss") },
+            Btn(tr("⚠ Фалшива", "⚠ False"), Overlay.DARK) { onAlertAction(id, "false") },
+            Btn(tr("✕ Скрий", "✕ Hide"), Overlay.GLASS) { onAlertAction(id, "dismiss") },
         ))
-        overlay.showCard("SOS · Помощ ${a.optInt("n")}$more", info(a), rows)
+        overlay.showCard(tr("SOS · Помощ ${a.optInt("n")}$more", "SOS · Help ${a.optInt("n")}$more"), info(a), rows)
     }
 
     private fun showMine() {
         notifyMine()
-        val head = if (mine) "🔴 Тревога · стигна до $mineReached" else "🔴 Изпраща тревогата…"
+        val head = if (mine) tr("🔴 Тревога · стигна до $mineReached", "🔴 Alarm · reached $mineReached") else tr("🔴 Изпраща тревогата…", "🔴 Sending the alarm…")
         val voice = recorder?.let {
             val s = ((System.currentTimeMillis() - recStart) / 1000).coerceAtMost(20)
-            "🎙 Записва… $s / 20 сек — говори"
+            tr("🎙 Записва… $s / 20 сек — говори", "🎙 Recording… $s / 20 sec — speak")
         } ?: mineVoice
-        val where = if (mineExact) "📍 Виждат: точното място" else "📍 Виждат: само района (~300 м)"
-        val help = if (mineHelpers > 0) "🙋 Идват: $mineHelpers · последно $mineLastHelper" else "🙋 Още никой не е тръгнал"
+        val where = if (mineExact) tr("📍 Виждат: точното място", "📍 They see: exact location") else tr("📍 Виждат: само района (~300 м)", "📍 They see: area only (~300 m)")
+        val help = if (mineHelpers > 0) tr("🙋 Идват: $mineHelpers · последно $mineLastHelper", "🙋 Coming: $mineHelpers · latest $mineLastHelper") else tr("🙋 Още никой не е тръгнал", "🙋 Nobody is on the way yet")
         val info = listOf(voice, where, help).filter { it.isNotBlank() }.joinToString("\n")
         val rows = mutableListOf<List<Btn>>()
         val r1 = mutableListOf<Btn>()
-        if (recorder != null) r1.add(Btn("⏹ Прати гласа", Overlay.BLUE) { stopRecording(send = true) })
-        else if (hasMic()) r1.add(Btn("🎙 Нов запис", Overlay.GLASS) { if (mine || minePending) startRecording(); refresh() })
-        else r1.add(Btn("🎙 Разреши микрофон", Overlay.BLUE) { openAppForMic() })
-        r1.add(Btn(if (mineExact) "📍 Само района" else "📍 Покажи точно", Overlay.GLASS) {
+        if (recorder != null) r1.add(Btn(tr("⏹ Прати гласа", "⏹ Send voice"), Overlay.BLUE) { stopRecording(send = true) })
+        else if (hasMic()) r1.add(Btn(tr("🎙 Нов запис", "🎙 New recording"), Overlay.GLASS) { if (mine || minePending) startRecording(); refresh() })
+        else r1.add(Btn(tr("🎙 Разреши микрофон", "🎙 Allow microphone"), Overlay.BLUE) { openAppForMic() })
+        r1.add(Btn(if (mineExact) tr("📍 Само района", "📍 Area only") else tr("📍 Покажи точно", "📍 Show exact"), Overlay.GLASS) {
             send(JSONObject().put("t", "exact").put("on", !mineExact))
         })
         rows.add(r1)
         rows.add(listOf(
             Btn("📞 112", Overlay.GREEN) { dial112() },
-            Btn("✕ Спри тревогата", Overlay.DARK) { send(JSONObject().put("t", "cancel")); clearMine() },
+            Btn(tr("✕ Спри тревогата", "✕ Stop the alarm"), Overlay.DARK) { send(JSONObject().put("t", "cancel")); clearMine() },
         ))
         overlay.hideBorder() // рамката не се показва на този в беда — да не го издава
         overlay.showCard(head, info, rows, bg = 0xF0212121.toInt())
@@ -527,11 +527,11 @@ class SosService : Service(), LocationListener {
         val km = String.format(Locale.US, "%.1f", distanceKm(a))
         val mins = ((System.currentTimeMillis() - a.optLong("ts")) / 60_000).coerceAtLeast(0)
         val street = addr[id]?.first?.takeIf { it.isNotBlank() }
-        val where = if (exact) (street ?: "точно място") else "район ~300 м" + (street?.let { " около $it" } ?: "")
+        val where = if (exact) (street ?: tr("точно място", "exact location")) else tr("район ~300 м", "area ~300 m") + (street?.let { tr(" около $it", " near $it") } ?: "")
         val helpers = a.optInt("helpers")
-        val h = if (helpers > 0) " · идват $helpers" else ""
-        val voice = if (a.optBoolean("audio")) "🎙 има гласово съобщение\n" else ""
-        return "$voice$where\n$km км · преди $mins мин$h"
+        val h = if (helpers > 0) tr(" · идват $helpers", " · $helpers coming") else ""
+        val voice = if (a.optBoolean("audio")) tr("🎙 има гласово съобщение\n", "🎙 has a voice message\n") else ""
+        return "$voice$where\n" + tr("$km км · преди $mins мин$h", "$km km · $mins min ago$h")
     }
 
     /** Улица по координатите. Пак се търси, ако точката се е преместила над 150 м. */
@@ -573,7 +573,7 @@ class SosService : Service(), LocationListener {
         val text = info(a)
         nm.notify(id.hashCode(), Notification.Builder(this, CH_ALERT)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("SOS · Помощ ${a.optInt("n")} има нужда от помощ")
+            .setContentTitle(tr("SOS · Помощ ${a.optInt("n")} има нужда от помощ", "SOS · Help ${a.optInt("n")} needs help"))
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentText(text.replace('\n', ' '))
             .setContentIntent(pi(mapUri(lat, lon), 0))
@@ -598,15 +598,15 @@ class SosService : Service(), LocationListener {
     private fun openApp() = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
 
     private fun openAppForMic() {
-        toast("Разреши „Микрофон“ — приложението ще се рестартира само")
+        toast(tr("Разреши „Микрофон“ — приложението ще се рестартира само", "Allow “Microphone” — the app will restart by itself"))
         try { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
     }
 
     /** Известие и при този, който е пуснал тревогата — потвърждение, че е тръгнала. */
     private fun notifyMine() {
         if (!mine && !minePending) { nm.cancel(NOTIF_MINE); return }
-        val head = if (mine) "Тревогата е пусната · стигна до $mineReached" else "Изпраща тревогата…"
-        val sub = if (mineHelpers > 0) "Идват: $mineHelpers · последно $mineLastHelper" else "Още никой не е тръгнал"
+        val head = if (mine) tr("Тревогата е пусната · стигна до $mineReached", "Alarm sent · reached $mineReached") else tr("Изпраща тревогата…", "Sending the alarm…")
+        val sub = if (mineHelpers > 0) tr("Идват: $mineHelpers · последно $mineLastHelper", "Coming: $mineHelpers · latest $mineLastHelper") else tr("Още никой не е тръгнал", "Nobody is on the way yet")
         nm.notify(NOTIF_MINE, Notification.Builder(this, CH_RUN)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("🔴 $head")

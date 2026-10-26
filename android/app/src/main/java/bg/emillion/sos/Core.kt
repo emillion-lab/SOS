@@ -9,7 +9,17 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.security.SecureRandom
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+/** Езикът следва телефона: български, ако е на български, иначе английски. */
+object Lang {
+    val bg: Boolean get() = Locale.getDefault().language == "bg"
+    val code: String get() = if (bg) "bg" else "en"
+}
+
+/** Текст на езика на телефона. */
+fun tr(bg: String, en: String): String = if (Lang.bg) bg else en
 
 object Prefs {
     private fun sp(c: Context) = c.getSharedPreferences("sos", Context.MODE_PRIVATE)
@@ -55,15 +65,15 @@ object Net {
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
 
-    val wsUrl: String get() = BuildConfig.SERVER.replaceFirst("https", "wss") + "/ws?token="
+    val wsUrl: String get() = BuildConfig.SERVER.replaceFirst("https", "wss") + "/ws?lang=" + Lang.code + "&token="
 
     /** Блокира — вика се от нишка. Без регистрация: само ид на устройството. */
     fun register(device: String): JSONObject {
-        val body = JSONObject().put("device", device).toString().toRequestBody("application/json".toMediaType())
+        val body = JSONObject().put("device", device).put("lang", Lang.code).toString().toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url(BuildConfig.SERVER + "/register").post(body).build()
         http.newCall(req).execute().use { r ->
             val j = JSONObject(r.body?.string() ?: "{}")
-            if (!r.isSuccessful) throw HttpError(r.code, j.optString("error", "Грешка " + r.code))
+            if (!r.isSuccessful) throw HttpError(r.code, j.optString("error", tr("Грешка ", "Error ") + r.code))
             return j
         }
     }

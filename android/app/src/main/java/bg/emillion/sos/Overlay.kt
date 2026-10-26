@@ -75,12 +75,12 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
         var dragging = false
         // Броячът е в балонче НАД бутона — под пръста не се вижда. Точно 2 сек: „2" → „1" → тревога.
         val fire = Runnable { if (!dragging) { hideBubble(); v.text = "…"; onHold() } }
-        val tick1 = Runnable { if (!dragging) showBubble(lp, if (alarmOn) "Спира след 1" else "1") }
+        val tick1 = Runnable { if (!dragging) showBubble(lp, if (alarmOn) tr("Спира след 1", "Stops in 1") else "1") }
         v.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y; dragging = false
-                    showBubble(lp, if (alarmOn) "Спира след 2" else "2")
+                    showBubble(lp, if (alarmOn) tr("Спира след 2", "Stops in 2") else "2")
                     v.postDelayed(tick1, 1000); v.postDelayed(fire, 2000)
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -148,7 +148,7 @@ class Overlay(private val ctx: Context, private val onHold: () -> Unit) {
     }
 
     private fun restoreLabel(v: TextView) {
-        v.text = if (alarmOn) (if (helpers > 0) "СТОП\n$helpers↗" else "СТОП") else "SOS"
+        v.text = if (alarmOn) (if (helpers > 0) tr("СТОП\n$helpers↗", "STOP\n$helpers↗") else tr("СТОП", "STOP")) else "SOS"
     }
 
     /** Моята тревога е пусната / спряна. helpers = колко идват. */
