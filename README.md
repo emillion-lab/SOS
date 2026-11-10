@@ -40,7 +40,9 @@
 - `deploy-sos.yml` — качва Worker-а
 - `sos-apk.yml` — строи APK, подписано с **постоянния ключ** от Cloudflare KV `sos-signing`, релийз `sos-apk-latest`
 
-Админ: https://sos.mihov-emil.workers.dev/admin — същият админ токен като на fish.taxi.
+Админ: страницата `/admin` е махната от публичния worker (ADMINSOS е отделно). API-то `/admin/*`
+иска собствен ключ `SOS_ADMIN_TOKEN` — Worker secret, взет от Cloudflare KV `sos-signing` → `admin-token`
+при деплой. Не е същият като на fish.taxi.
 
 ## Известни ограничения
 - Само Android. iPhone не позволява бутон над други приложения.
